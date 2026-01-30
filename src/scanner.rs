@@ -7,12 +7,14 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
 };
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileKey {
     pub dev: u64,
     pub inode: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FileNode {
     pub key: FileKey,

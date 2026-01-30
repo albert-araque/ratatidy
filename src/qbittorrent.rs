@@ -11,6 +11,7 @@ pub struct TorrentInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct TorrentFile {
     pub name: String,
     pub size: u64,
@@ -19,6 +20,7 @@ pub struct TorrentFile {
 #[async_trait]
 pub trait QbitClient: Send + Sync {
     async fn get_torrents(&self) -> anyhow::Result<Vec<TorrentInfo>>;
+    #[allow(dead_code)]
     async fn get_torrent_files(&self, hash: &str) -> anyhow::Result<Vec<TorrentFile>>;
 }
 

@@ -2,6 +2,7 @@ use crate::scanner::FileNode;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum GroupKind {
     Movie,
@@ -10,6 +11,7 @@ pub enum GroupKind {
     Other,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Group {
     pub kind: GroupKind,

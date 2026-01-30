@@ -64,11 +64,68 @@ async fn main() -> Result<()> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
+                        KeyCode::Esc => {
+                            if app.show_confirmation {
+                                app.cancel_delete();
+                            } else if app.search_active {
+                                app.search_active = false;
+                                app.search_query.clear();
+                            }
+                        }
+                        KeyCode::Char(c) if app.search_active => {
+                            app.search_query.push(c);
+                            app.selected_index = 0;
+                        }
+                        KeyCode::Backspace if app.search_active => {
+                            app.search_query.pop();
+                            app.selected_index = 0;
+                        }
                         KeyCode::Char('q') => app.quit(),
                         KeyCode::Tab => app.next_tab(),
-                        KeyCode::Down | KeyCode::Char('j') => app.select_next(),
-                        KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
-                        KeyCode::Char('i') => app.toggle_details(),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.show_confirmation {
+                                app.delete_scope = app.delete_scope.next(&app.available_scopes);
+                            } else {
+                                app.select_next();
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.show_confirmation {
+                                app.delete_scope = app.delete_scope.prev(&app.available_scopes);
+                            } else {
+                                app.select_prev();
+                            }
+                        }
+                        KeyCode::Char('i') => {
+                            if !app.show_confirmation {
+                                app.toggle_details();
+                            }
+                        }
+                        KeyCode::Char('t') | KeyCode::Char('d') => {
+                            if !app.show_confirmation {
+                                app.request_delete();
+                            }
+                        }
+                        KeyCode::Char('f') => {
+                            if !app.show_confirmation && !app.search_active {
+                                app.filter = app.filter.next();
+                            }
+                        }
+                        KeyCode::Char('s') => {
+                            if !app.show_confirmation && !app.search_active {
+                                app.sort_by = app.sort_by.next();
+                            }
+                        }
+                        KeyCode::Char('/') => {
+                            if !app.show_confirmation {
+                                app.search_active = true;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.show_confirmation {
+                                app.confirm_delete();
+                            }
+                        }
                         _ => {}
                     }
                 }
