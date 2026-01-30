@@ -51,26 +51,16 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         let items: Vec<ListItem> = groups
             .iter()
             .map(|group| {
-                let mut seeding_count = 0;
                 let mut hardlink_count = 0;
                 let mut total_size = 0;
                 for node in &group.nodes {
-                    if node.is_seeding {
-                        seeding_count += 1;
-                    }
                     if node.has_downloads && node.has_media {
                         hardlink_count += 1;
                     }
                     total_size += node.size;
                 }
 
-                let status = format!(
-                    "[SEED:{}/{}] [LINK:{}/{}]",
-                    seeding_count,
-                    group.nodes.len(),
-                    hardlink_count,
-                    group.nodes.len()
-                );
+                let status = format!("[LINK:{}/{}]", hardlink_count, group.nodes.len());
 
                 let size_str = format_size(total_size);
 
@@ -89,10 +79,41 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
         // Sidebar / Details (Only if enabled)
         if app.show_details {
-            // Simplified detail panel as per instruction
-            let details = Paragraph::new("Detail Panel Content (Coming Soon)")
-                .block(Block::default().borders(Borders::ALL).title(" Details "));
-            frame.render_widget(details, main_chunks[1]);
+            if let Some(group) = groups.get(app.selected_index) {
+                let mut lines = vec![
+                    ratatui::text::Line::from(format!("Group: {}", group.title))
+                        .bold()
+                        .yellow(),
+                    ratatui::text::Line::from("-".repeat(group.title.len() + 7)).dim(),
+                ];
+
+                for node in &group.nodes {
+                    let status = if node.has_downloads && node.has_media {
+                        " (LINKED) ".fg(Color::Green)
+                    } else if node.has_downloads {
+                        " (ORPHAN-D) ".fg(Color::Red)
+                    } else {
+                        " (ORPHAN-M) ".fg(Color::Magenta)
+                    };
+
+                    lines.push(ratatui::text::Line::from(vec![
+                        "• ".into(),
+                        format_size(node.size).into(),
+                        status,
+                    ]));
+
+                    for path in &node.paths {
+                        lines
+                            .push(ratatui::text::Line::from(format!("  {}", path.display())).dim());
+                    }
+                    lines.push(ratatui::text::Line::from(""));
+                }
+
+                let details = Paragraph::new(lines)
+                    .block(Block::default().borders(Borders::ALL).title(" Details "))
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                frame.render_widget(details, main_chunks[1]);
+            }
         }
     }
 
@@ -221,14 +242,10 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
     let mut total_files = 0;
     let mut total_size = 0;
     let mut saved_size = 0;
-    let mut seeding = 0;
 
     for group in all_groups {
         for node in &group.nodes {
             total_files += 1;
-            if node.is_seeding {
-                seeding += 1;
-            }
             if node.has_downloads && node.has_media {
                 saved_size += node.size;
             }
@@ -237,11 +254,10 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
     }
 
     let stats = format!(
-        " Files: {} | Size: {} | Saved: {} | Seeding: {} ",
+        " Files: {} | Size: {} | Saved: {} ",
         total_files,
         format_size(total_size),
-        format_size(saved_size),
-        seeding
+        format_size(saved_size)
     );
 
     let dashboard = Paragraph::new(stats)

@@ -10,8 +10,11 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 config = "0.14"
 anyhow = "1.0"
-directories = "5.0" # Helpful for cross-platform config paths
-windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+directories = "5.0"
 async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json", "cookies"] }
 tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.5.56", features = ["derive", "env"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }

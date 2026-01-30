@@ -22,6 +22,7 @@ pub trait QbitClient: Send + Sync {
     async fn get_torrents(&self) -> anyhow::Result<Vec<TorrentInfo>>;
     #[allow(dead_code)]
     async fn get_torrent_files(&self, hash: &str) -> anyhow::Result<Vec<TorrentFile>>;
+    async fn delete_torrent(&self, hash: &str, delete_files: bool) -> anyhow::Result<()>;
 }
 
 pub struct MockQbitClient;
@@ -65,5 +66,62 @@ impl QbitClient for MockQbitClient {
             ]),
             _ => Ok(vec![]),
         }
+    }
+
+    async fn delete_torrent(&self, _hash: &str, _delete_files: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+pub struct RealQbitClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl RealQbitClient {
+    pub async fn new(
+        url: &str,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder().cookie_store(true).build()?;
+
+        let base_url = url.trim_end_matches('/').to_string();
+
+        if let (Some(u), Some(p)) = (username, password) {
+            let login_url = format!("{}/api/v2/auth/login", base_url);
+            client
+                .post(&login_url)
+                .form(&[("username", &u), ("password", &p)])
+                .send()
+                .await?;
+        }
+
+        Ok(Self { client, base_url })
+    }
+}
+
+#[async_trait]
+impl QbitClient for RealQbitClient {
+    async fn get_torrents(&self) -> anyhow::Result<Vec<TorrentInfo>> {
+        let url = format!("{}/api/v2/torrents/info", self.base_url);
+        let torrents = self.client.get(&url).send().await?.json().await?;
+        Ok(torrents)
+    }
+
+    async fn get_torrent_files(&self, hash: &str) -> anyhow::Result<Vec<TorrentFile>> {
+        let url = format!("{}/api/v2/torrents/files?hash={}", self.base_url, hash);
+        let files = self.client.get(&url).send().await?.json().await?;
+        Ok(files)
+    }
+
+    async fn delete_torrent(&self, hash: &str, delete_files: bool) -> anyhow::Result<()> {
+        let url = format!("{}/api/v2/torrents/delete", self.base_url);
+        self.client
+            .post(&url)
+            .form(&[("hashes", hash), ("deleteFiles", &delete_files.to_string())])
+            .send()
+            .await?;
+        Ok(())
     }
 }

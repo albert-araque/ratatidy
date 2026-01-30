@@ -9,6 +9,7 @@ pub struct App {
     pub active_tab: Tab,
     pub media_groups: Vec<Group>,
     pub download_groups: Vec<Group>,
+    pub nodes: Vec<FileNode>,
     pub selected_index: usize,
     pub show_details: bool,
     pub show_confirmation: bool,
@@ -18,6 +19,7 @@ pub struct App {
     pub search_active: bool,
     pub sort_by: SortBy,
     pub filter: FilterMode,
+    pub pending_qbit_deletions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,8 +27,6 @@ pub enum FilterMode {
     All,
     Orphans,
     Hardlinked,
-    Seeding,
-    NotSeeding,
 }
 
 impl FilterMode {
@@ -34,9 +34,7 @@ impl FilterMode {
         match self {
             FilterMode::All => FilterMode::Orphans,
             FilterMode::Orphans => FilterMode::Hardlinked,
-            FilterMode::Hardlinked => FilterMode::Seeding,
-            FilterMode::Seeding => FilterMode::NotSeeding,
-            FilterMode::NotSeeding => FilterMode::All,
+            FilterMode::Hardlinked => FilterMode::All,
         }
     }
 }
@@ -45,15 +43,13 @@ impl FilterMode {
 pub enum SortBy {
     Name,
     Size,
-    Seeding,
 }
 
 impl SortBy {
     pub fn next(self) -> Self {
         match self {
             SortBy::Name => SortBy::Size,
-            SortBy::Size => SortBy::Seeding,
-            SortBy::Seeding => SortBy::Name,
+            SortBy::Size => SortBy::Name,
         }
     }
 }
@@ -94,15 +90,13 @@ pub enum Tab {
 
 impl App {
     pub fn new(config: Config, nodes: Vec<FileNode>, _torrents: Vec<TorrentInfo>) -> Self {
-        let media_groups = group_by_media(&nodes, &config.media_dirs);
-        let download_groups = group_by_downloads(&nodes, &config.download_dir);
-
-        Self {
+        let mut app = Self {
             config,
             running: true,
             active_tab: Tab::Media,
-            media_groups,
-            download_groups,
+            media_groups: Vec::new(),
+            download_groups: Vec::new(),
+            nodes,
             selected_index: 0,
             show_details: false,
             show_confirmation: false,
@@ -112,7 +106,15 @@ impl App {
             search_active: bool::from(false),
             sort_by: SortBy::Name,
             filter: FilterMode::All,
-        }
+            pending_qbit_deletions: Vec::new(),
+        };
+        app.refresh_groups();
+        app
+    }
+
+    pub fn refresh_groups(&mut self) {
+        self.media_groups = group_by_media(&self.nodes, &self.config.media_dirs);
+        self.download_groups = group_by_downloads(&self.nodes, &self.config.download_dir);
     }
 
     pub fn toggle_details(&mut self) {
@@ -146,14 +148,6 @@ impl App {
                 .into_iter()
                 .filter(|g| g.nodes.iter().all(|n| n.has_downloads && n.has_media))
                 .collect(),
-            FilterMode::Seeding => filtered
-                .into_iter()
-                .filter(|g| g.nodes.iter().any(|n| n.is_seeding))
-                .collect(),
-            FilterMode::NotSeeding => filtered
-                .into_iter()
-                .filter(|g| g.nodes.iter().all(|n| !n.is_seeding))
-                .collect(),
         };
 
         match self.sort_by {
@@ -162,11 +156,6 @@ impl App {
                 let size_a: u64 = a.nodes.iter().map(|n| n.size).sum();
                 let size_b: u64 = b.nodes.iter().map(|n| n.size).sum();
                 size_b.cmp(&size_a) // Descending size
-            }),
-            SortBy::Seeding => filtered.sort_by(|a, b| {
-                let seed_a = a.nodes.iter().filter(|n| n.is_seeding).count();
-                let seed_b = b.nodes.iter().filter(|n| n.is_seeding).count();
-                seed_b.cmp(&seed_a)
             }),
         }
 
@@ -257,62 +246,116 @@ impl App {
     }
 
     fn execute_delete(&mut self) {
-        if let Some(group_ref) = self.current_groups().get(self.selected_index) {
-            // We need to find the actual index in the original list
-            let title = &group_ref.title;
-            let group_opt = match self.active_tab {
-                Tab::Media => self.media_groups.iter().position(|g| &g.title == title),
-                Tab::Downloads => self.download_groups.iter().position(|g| &g.title == title),
+        let group_title = if let Some(g) = self.current_groups().get(self.selected_index) {
+            g.title.clone()
+        } else {
+            return;
+        };
+
+        let mut hashes_to_delete = Vec::new();
+        let mut paths_to_remove = Vec::new();
+
+        // 1. Identify what needs to be deleted in the master nodes
+        for node in &mut self.nodes {
+            // Check if this node belongs to the selected group
+            let is_in_group = match self.active_tab {
+                Tab::Media => self.config.media_dirs.iter().any(|m| {
+                    node.paths.iter().any(|p| {
+                        if let Ok(rel) = p.strip_prefix(m) {
+                            if let Some(first) = rel.components().next() {
+                                return first.as_os_str().to_string_lossy() == group_title;
+                            }
+                        }
+                        false
+                    })
+                }),
+                Tab::Downloads => node.paths.iter().any(|p| {
+                    if let Ok(rel) = p.strip_prefix(&self.config.download_dir) {
+                        if let Some(first) = rel.components().next() {
+                            return first.as_os_str().to_string_lossy() == group_title;
+                        }
+                    }
+                    false
+                }),
             };
 
-            if let Some(idx) = group_opt {
-                let group = match self.active_tab {
-                    Tab::Media => &self.media_groups[idx],
-                    Tab::Downloads => &self.download_groups[idx],
-                };
-                match self.delete_scope {
-                    DeleteScope::Downloads => {
-                        for node in &group.nodes {
-                            for path in &node.paths {
-                                if path.starts_with(&self.config.download_dir) {
-                                    let _ = std::fs::remove_file(path);
-                                }
-                            }
-                        }
-                    }
-                    DeleteScope::Media => {
-                        for node in &group.nodes {
-                            for path in &node.paths {
-                                let is_in_media = self
-                                    .config
-                                    .media_dirs
-                                    .iter()
-                                    .any(|media_dir| path.starts_with(media_dir));
-                                if is_in_media {
-                                    let _ = std::fs::remove_file(path);
-                                }
-                            }
-                        }
-                    }
-                    DeleteScope::All => {
-                        for node in &group.nodes {
-                            for path in &node.paths {
-                                let _ = std::fs::remove_file(path);
+            if !is_in_group {
+                continue;
+            }
+
+            match self.delete_scope {
+                DeleteScope::Downloads => {
+                    if let Some(hash) = &node.torrent_hash {
+                        hashes_to_delete.push(hash.clone());
+                    } else {
+                        for path in &node.paths {
+                            if path.starts_with(&self.config.download_dir) {
+                                paths_to_remove.push(path.clone());
                             }
                         }
                     }
                 }
-
-                match self.active_tab {
-                    Tab::Media => {
-                        self.media_groups.remove(idx);
+                DeleteScope::Media => {
+                    for path in &node.paths {
+                        if self.config.media_dirs.iter().any(|m| path.starts_with(m)) {
+                            paths_to_remove.push(path.clone());
+                        }
                     }
-                    Tab::Downloads => {
-                        self.download_groups.remove(idx);
+                }
+                DeleteScope::All => {
+                    if let Some(hash) = &node.torrent_hash {
+                        hashes_to_delete.push(hash.clone());
+                    } else {
+                        for path in &node.paths {
+                            if path.starts_with(&self.config.download_dir) {
+                                paths_to_remove.push(path.clone());
+                            }
+                        }
+                    }
+                    for path in &node.paths {
+                        if self.config.media_dirs.iter().any(|m| path.starts_with(m)) {
+                            paths_to_remove.push(path.clone());
+                        }
                     }
                 }
             }
         }
+
+        // 2. Perform actual disk deletion for non-torrent paths
+        for path in &paths_to_remove {
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        // 3. Queue qBit deletions
+        for hash in hashes_to_delete {
+            if !self.pending_qbit_deletions.contains(&hash) {
+                self.pending_qbit_deletions.push(hash);
+            }
+        }
+
+        // 4. Update the master nodes state
+        for node in &mut self.nodes {
+            node.paths.retain(|p| !paths_to_remove.contains(p));
+
+            // Re-calculate flags
+            node.has_downloads = node
+                .paths
+                .iter()
+                .any(|p| p.starts_with(&self.config.download_dir));
+            node.has_media = node
+                .paths
+                .iter()
+                .any(|p| self.config.media_dirs.iter().any(|m| p.starts_with(m)));
+        }
+
+        // 5. Cleanup empty nodes
+        self.nodes.retain(|n| !n.paths.is_empty());
+
+        // 6. Refresh views
+        self.refresh_groups();
+
         if self.selected_index >= self.current_groups().len() && !self.current_groups().is_empty() {
             self.selected_index = self.current_groups().len() - 1;
         }

@@ -8,7 +8,7 @@ mod ui;
 
 use crate::app::App;
 use crate::config::Config;
-use crate::qbittorrent::{MockQbitClient, QbitClient};
+use crate::qbittorrent::{MockQbitClient, QbitClient, RealQbitClient};
 use crate::scanner::Scanner;
 use crate::tui::Tui;
 use anyhow::Result;
@@ -18,11 +18,11 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load config (eventually from file, for now default)
-    let mut config = Config::default();
+    // Load config from CLI arguments or Environment Variables
+    let mut config = Config::load();
 
-    // Auto-detect mock environment for easier testing
-    if Path::new("mock_env").exists() {
+    // Development helper: If no dirs provided and mock_env exists, use it
+    if config.media_dirs.is_empty() && Path::new("mock_env").exists() {
         config.download_dir = std::fs::canonicalize("mock_env/downloads")?;
         config.media_dirs = vec![
             std::fs::canonicalize("mock_env/media/movies")?,
@@ -30,8 +30,21 @@ async fn main() -> Result<()> {
         ];
     }
 
-    // Phase 3: Fetch qBittorrent data
-    let qbit = MockQbitClient;
+    // Phase 7: Fetch qBittorrent data
+    let qbit: Box<dyn QbitClient> = if Path::new("mock_env").exists() {
+        Box::new(MockQbitClient)
+    } else {
+        match RealQbitClient::new(
+            &config.qbittorrent.url,
+            config.qbittorrent.username.clone(),
+            config.qbittorrent.password.clone(),
+        )
+        .await
+        {
+            Ok(client) => Box::new(client),
+            Err(_) => Box::new(MockQbitClient), // Fallback if no real client
+        }
+    };
     let torrents = qbit.get_torrents().await.unwrap_or_default();
 
     let scanner = Scanner::new(config.download_dir.clone(), config.media_dirs.clone());
@@ -131,6 +144,15 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
+        // Process qBit deletions
+        if !app.pending_qbit_deletions.is_empty() {
+            let hashes: Vec<String> = app.pending_qbit_deletions.drain(..).collect();
+            for hash in hashes {
+                let _ = qbit.delete_torrent(&hash, true).await;
+            }
+        }
+
         app.tick();
     }
 
