@@ -1,37 +1,22 @@
-# Future Roadmap
+# Future Roadmap (Updated)
 
-## Phase 5: Container Actions (Purge) [x]
-- **Objective**: Allow the user to permanently remove items with context awareness.
-- **Tasks**:
-    - [x] Implement context-aware scope detection (Downloads vs Media vs Both).
-    - [x] Permanent deletion logic using `std::fs::remove_file`.
-    - [x] Irreversible confirmation dialog.
+## Phase 7: Real API + Compatibility (Finishing) [/]
+- [x] Real qBittorrent API integration.
+- [x] Linux / Debian compatibility.
+- [ ] **Rescan Logic (`r`)**: Allow manual refresh of the master list without app restart.
+- [ ] **Empty Folder Cleanup**: Automatically (or optionally) remove parent directories when they become empty after a purge.
 
-## Phase 6: Filters + Search + UI Polish
-- **Objective**: Improve usability and visibility.
-- **Tasks**:
-    - [x] Dynamic search bar (`/`).
-    - [ ] Fix **Search Key Conflict** (Bug: actions firing during search).
-    - [ ] Dynamic File Size columns (MB/GB).
-    - [ ] Sorting: Alpha, Size, Date, Savings.
-    - [ ] Quick filters: `Orphans Only`, `No Seeding`, `Duplicates`.
-    - [ ] Top dashboard showing total recovered space.
+## Phase 8: Safety & Robustness [ ]
+- [ ] **Move to Trash (`t`)**: Implement optional file movement to a `.trash` folder instead of immediate deletion.
+- [ ] **Container Safety Rule**: Prevent deleting folders that contain files not belonging to the selected group.
+- [ ] **Inode-based qBit Matching**: Use absolute paths or internal IDs for 100% accurate torrent-to-file matching.
+- [ ] **Rescan Logic (`r`)**: Allow manual refresh of the master list without app restart.
+- [ ] **Empty Folder Cleanup**: Automatically remove parent directories when they become empty after a purge.
 
-## Phase 7: Real API + Compatibility
-- **Objective**: Transition to production and Linux.
-- **Tasks**:
-    - [ ] Implement `RealQbitClient` using `reqwest`.
-    - [ ] Linux Compatibility (Debian/Ubuntu focus).
-    - [ ] Auto or manual rescan logic (`r`).
-    - [ ] Connection error handling and persistent logs.
+## Phase 9: Advanced Features [ ]
+- [ ] **Remote Scan**: Support scanning a remote server via SSH or a small agent.
+- [ ] **Web UI**: A simple read-only web view of the dashboard.
 
-## Future Ideas & Brainstorming
-- (Add new ideas here)
-
-## Current Known Issues & Debt
-- **Heuristic Matching**: Name-based matching between qBit and disk is a heuristic (to be refined).
-- **UI State vs Disk**: Actions only remove items from the UI list; a full re-scan is needed for consistency if the disk changes externally.
-- **Hardcoded Paths**: Configuration is hardcoded to `mock_env` if it exists.
-
-## BUGS
-- (Add new bugs here)
+## Current Known Issues
+- **Scaling**: Scanning huge libraries (10k+ files) might pause the TUI slightly (needs async scanning).
+- **Matching**: Torrent name changes can break the current heuristic matching.

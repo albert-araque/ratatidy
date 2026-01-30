@@ -1,29 +1,27 @@
-# Implementation State - Checkpoint 1
+# Implementation State - Checkpoint 2
 
 ## Completed Phases
 
 - **Phase 1: Setup + Minimal TUI** [x]
-    - Initial project setup, basic TUI layout, and tab navigation.
 - **Phase 2: Hardlink Scanner** [x]
-    - Win32 API integration for cross-volume hardlink detection.
-    - Mock environment script (`setup_mock.ps1`) for local testing.
 - **Phase 3: qBittorrent MVP (Mock)** [x]
-    - Async client trait and mock implementation.
-    - Seeding status labels in UI.
 - **Phase 4: Grouping and 2 POVs** [x]
-    - Logic for grouping by Media vs. Downloads.
-    - Dynamic UI labels (`SEED`, `LINK`).
-    - Toggleable Detail Panel (`i` key).
 - **Phase 5: Container Actions (Permanent Delete)** [x]
-    - Context-aware deletion logic (only shows options for existing locations).
-    - Permanent removal using `std::fs` (bypasses Trash).
-    - Red confirmation dialog with Irreversible warning.
+- **Phase 6: Filters + Search + Dashboard** [x]
+    - Search conflict fixed.
+    - Sorting by Name/Size.
+    - Filters for Orphans/Hardlinked.
+    - Space savings dashboard.
+- **Phase 7: Real API + Portability** [/]
+    - [x] `RealQbitClient` implementation.
+    - [x] CLI & Environment Variables configuration.
+    - [x] Cross-platform support (Debian/Linux).
+    - [x] Single Source of Truth Refactor (app state sync).
 
 ## Current Status
-The application is fully functional in a "mock" environment. You can see how many files in a Movie folder are also in Downloads, if they are seeding, and if they are correctly hardlinked. You can now also perform "Purge" actions with a context-aware popup that only shows valid deletion targets (Downloads/Media/All) depending on where the files actually exist.
+The application is production-ready for basic usage. It accurately detects hardlinks on both Windows and Linux, integrates with real qBittorrent instances, and provides a safe, context-aware deletion interface.
 
 ## Technical Debt / Known Issues
-(Currently tracked in roadmap.md)
-
-## BUGS
-(Currently tracked in roadmap.md)
+1. **Empty Folder Cleanup**: "Container" mode deletes files but leaves the parent folders if they become empty.
+2. **Rescan Logic**: No "r" key to refresh data from disk without restarting.
+3. **Fragile Matching**: qBit-to-disk matching uses simplified name-contains logic.
