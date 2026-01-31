@@ -3,12 +3,14 @@ use crate::grouping::{Group, group_by_downloads, group_by_media};
 use crate::qbittorrent::TorrentInfo;
 use crate::scanner::FileNode;
 
+static EMPTY_GROUPS: Vec<Group> = Vec::new();
+
 pub struct App {
     pub config: Config,
     pub running: bool,
     pub active_tab: Tab,
-    pub media_groups: Vec<Group>,
-    pub download_groups: Vec<Group>,
+    pub media_groups: Option<Vec<Group>>,
+    pub download_groups: Option<Vec<Group>>,
     pub nodes: Vec<FileNode>,
     pub selected_index: usize,
     pub show_details: bool,
@@ -21,6 +23,18 @@ pub struct App {
     pub sort_order: SortOrder,
     pub filter: FilterMode,
     pub pending_qbit_deletions: Vec<String>,
+    pub state: AppState,
+    pub torrents: Vec<TorrentInfo>,
+}
+
+#[derive(Debug)]
+pub enum AppState {
+    Ready,
+    Scanning {
+        processed: usize,
+        receiver: std::sync::mpsc::Receiver<crate::scanner::ScanEvent>,
+    },
+    Error(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,8 +126,8 @@ impl App {
             config,
             running: true,
             active_tab: Tab::Media,
-            media_groups: Vec::new(),
-            download_groups: Vec::new(),
+            media_groups: None,
+            download_groups: None,
             nodes,
             selected_index: 0,
             show_details: false,
@@ -126,26 +140,36 @@ impl App {
             sort_order: SortOrder::Ascending,
             filter: FilterMode::All,
             pending_qbit_deletions: Vec::new(),
+            state: AppState::Ready,
+            torrents: _torrents,
         };
         app.refresh_groups();
         app
     }
 
     pub fn refresh_groups(&mut self) {
-        self.media_groups = group_by_media(&self.nodes, &self.config.media_dirs);
-        if let Some(ref download_dir) = self.config.download_dir {
-            self.download_groups = group_by_downloads(&self.nodes, download_dir);
-        }
+        self.media_groups = None;
+        self.download_groups = None;
     }
 
     pub fn toggle_details(&mut self) {
         self.show_details = !self.show_details;
     }
 
+    pub fn ensure_groups(&mut self) {
+        if self.active_tab == Tab::Media && self.media_groups.is_none() {
+            self.media_groups = Some(group_by_media(&self.nodes, &self.config.media_dirs));
+        } else if self.active_tab == Tab::Downloads && self.download_groups.is_none() {
+            if let Some(ref download_dir) = self.config.download_dir {
+                self.download_groups = Some(group_by_downloads(&self.nodes, download_dir));
+            }
+        }
+    }
+
     pub fn current_groups(&self) -> Vec<&Group> {
         let groups = match self.active_tab {
-            Tab::Media => &self.media_groups,
-            Tab::Downloads => &self.download_groups,
+            Tab::Media => self.media_groups.as_ref().unwrap_or(&EMPTY_GROUPS),
+            Tab::Downloads => self.download_groups.as_ref().unwrap_or(&EMPTY_GROUPS),
         };
 
         let mut filtered: Vec<&Group> = if self.search_query.is_empty() {
@@ -224,7 +248,42 @@ impl App {
     }
 
     pub fn tick(&mut self) {
-        // Here we will eventually handle background updates
+        if let AppState::Scanning {
+            ref mut processed,
+            ref receiver,
+        } = self.state
+        {
+            while let Ok(event) = receiver.try_recv() {
+                match event {
+                    crate::scanner::ScanEvent::FileScanned => {
+                        *processed += 1;
+                    }
+                    crate::scanner::ScanEvent::Finished(mut nodes) => {
+                        // Enrich nodes with torrent data
+                        for node in &mut nodes {
+                            for path in &node.paths {
+                                let path_str = path.to_string_lossy();
+                                for torrent in &self.torrents {
+                                    if path_str.contains(&torrent.name) {
+                                        node.torrent_hash = Some(torrent.hash.clone());
+                                        node.is_seeding = torrent.state.contains("UP")
+                                            || torrent.state.contains("uploading");
+                                    }
+                                }
+                            }
+                        }
+                        self.nodes = nodes;
+                        self.refresh_groups();
+                        self.state = AppState::Ready;
+                        break;
+                    }
+                    crate::scanner::ScanEvent::Error(e) => {
+                        self.state = AppState::Error(e);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     pub fn quit(&mut self) {

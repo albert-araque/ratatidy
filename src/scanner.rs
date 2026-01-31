@@ -13,14 +13,25 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileKey {
     pub dev: u64,
     pub inode: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ScanEvent {
+    FileScanned,
+    Finished(Vec<FileNode>),
+    Error(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileNode {
     pub key: FileKey,
     pub size: u64,
@@ -31,6 +42,44 @@ pub struct FileNode {
     pub torrent_hash: Option<String>,
     pub is_seeding: bool,
     pub modified: Option<SystemTime>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct ScanCache {
+    entries: HashMap<PathBuf, CacheEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CacheEntry {
+    key: FileKey,
+    nlink: u32,
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+impl ScanCache {
+    fn load() -> Self {
+        if let Some(proj_dirs) = directories::ProjectDirs::from("com", "ratatidy", "ratatidy") {
+            let cache_path = proj_dirs.cache_dir().join("scan_cache.json");
+            if cache_path.exists() {
+                if let Ok(content) = fs::read_to_string(cache_path) {
+                    return serde_json::from_str(&content).unwrap_or_default();
+                }
+            }
+        }
+        Self::default()
+    }
+
+    fn save(&self) -> Result<()> {
+        if let Some(proj_dirs) = directories::ProjectDirs::from("com", "ratatidy", "ratatidy") {
+            let cache_dir = proj_dirs.cache_dir();
+            fs::create_dir_all(cache_dir)?;
+            let cache_path = cache_dir.join("scan_cache.json");
+            let content = serde_json::to_string(self)?;
+            fs::write(cache_path, content)?;
+        }
+        Ok(())
+    }
 }
 
 pub struct Scanner {
@@ -46,20 +95,47 @@ impl Scanner {
         }
     }
 
-    pub fn scan(&self) -> Result<Vec<FileNode>> {
-        let mut nodes: HashMap<FileKey, FileNode> = HashMap::new();
-        self.scan_dir(&self.download_dir, true, &mut nodes)?;
-        for media_dir in &self.media_dirs {
-            self.scan_dir(media_dir, false, &mut nodes)?;
-        }
-        Ok(nodes.into_values().collect())
+    pub fn scan_async(&self, sender: std::sync::mpsc::Sender<ScanEvent>) {
+        let download_dir = self.download_dir.clone();
+        let media_dirs = self.media_dirs.clone();
+        let scanner_clone = Self::new(download_dir.clone(), media_dirs.clone());
+
+        std::thread::spawn(move || {
+            let mut nodes: HashMap<FileKey, FileNode> = HashMap::new();
+            let cache = Arc::new(Mutex::new(ScanCache::load()));
+
+            if let Err(e) =
+                scanner_clone.scan_async_dir(&download_dir, true, &mut nodes, &sender, &cache)
+            {
+                let _ = sender.send(ScanEvent::Error(e.to_string()));
+                return;
+            }
+
+            for media_dir in &media_dirs {
+                if let Err(e) =
+                    scanner_clone.scan_async_dir(media_dir, false, &mut nodes, &sender, &cache)
+                {
+                    let _ = sender.send(ScanEvent::Error(e.to_string()));
+                    return;
+                }
+            }
+
+            // Save cache
+            if let Ok(cache) = cache.lock() {
+                let _ = cache.save();
+            }
+
+            let _ = sender.send(ScanEvent::Finished(nodes.into_values().collect()));
+        });
     }
 
-    fn scan_dir(
+    fn scan_async_dir(
         &self,
         path: &Path,
         is_download: bool,
         nodes: &mut HashMap<FileKey, FileNode>,
+        sender: &std::sync::mpsc::Sender<ScanEvent>,
+        cache: &Arc<Mutex<ScanCache>>,
     ) -> Result<()> {
         if !path.exists() {
             return Ok(());
@@ -71,20 +147,54 @@ impl Scanner {
             let path = entry.path();
 
             if metadata.is_dir() {
-                self.scan_dir(&path, is_download, nodes)?;
+                self.scan_async_dir(&path, is_download, nodes, sender, cache)?;
             } else if metadata.is_file() {
-                let (key, nlink) = self.get_file_info(&path, &metadata)?;
+                let mtime = metadata.created().ok().or_else(|| metadata.modified().ok());
+                let size = metadata.len();
+
+                let (key, nlink) = {
+                    let mut cache_lock = cache.lock().unwrap();
+                    if let Some(entry) = cache_lock.entries.get(&path) {
+                        if entry.size == size && entry.modified == mtime {
+                            (entry.key, entry.nlink)
+                        } else {
+                            let (key, nlink) = self.get_file_info(&path, &metadata)?;
+                            cache_lock.entries.insert(
+                                path.clone(),
+                                CacheEntry {
+                                    key,
+                                    nlink,
+                                    size,
+                                    modified: mtime,
+                                },
+                            );
+                            (key, nlink)
+                        }
+                    } else {
+                        let (key, nlink) = self.get_file_info(&path, &metadata)?;
+                        cache_lock.entries.insert(
+                            path.clone(),
+                            CacheEntry {
+                                key,
+                                nlink,
+                                size,
+                                modified: mtime,
+                            },
+                        );
+                        (key, nlink)
+                    }
+                };
 
                 let node = nodes.entry(key).or_insert_with(|| FileNode {
                     key,
-                    size: metadata.len(),
+                    size,
                     nlink,
                     paths: Vec::new(),
                     has_downloads: false,
                     has_media: false,
                     torrent_hash: None,
                     is_seeding: false,
-                    modified: metadata.created().ok().or_else(|| metadata.modified().ok()),
+                    modified: mtime,
                 });
 
                 node.paths.push(path);
@@ -93,6 +203,7 @@ impl Scanner {
                 } else {
                     node.has_media = true;
                 }
+                let _ = sender.send(ScanEvent::FileScanned);
             }
         }
         Ok(())

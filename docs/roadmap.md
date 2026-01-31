@@ -12,11 +12,11 @@
 - [x] **CLI + Env Coexistence**: `--dry-run` flag and env vars work together.
 - [x] **dotenvy Support**: Load `.env` file from current directory.
 
-## Phase 9: Performance & Scaling [ ]
-- [ ] **Async Scanning**: Use background thread/async for disk scan.
-- [ ] **Progress Indicator**: Show scanning progress for large libraries (2-3TB+).
-- [ ] **Lazy Loading**: Load groups on-demand instead of all at startup.
-- [ ] **Caching**: Cache scan results to avoid full rescan on every startup.
+## Phase 9: Performance & Scaling [x]
+- [x] **Async Scanning**: Use background thread/async for disk scan.
+- [x] **Progress Indicator**: Show scanning progress for large libraries (2-3TB+).
+- [x] **Lazy Loading**: Load groups on-demand instead of all at startup.
+- [x] **Caching**: Cache scan results to avoid full rescan on every startup.
 
 ## Phase 10: Safety & Robustness [ ]
 - [ ] **Move to Trash (`t`)**: Optional file movement to a `.trash` folder.

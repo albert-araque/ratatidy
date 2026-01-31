@@ -6,7 +6,7 @@ mod scanner;
 mod tui;
 mod ui;
 
-use crate::app::App;
+use crate::app::{App, AppState};
 use crate::config::Config;
 use crate::qbittorrent::{MockQbitClient, QbitClient, RealQbitClient};
 use crate::scanner::Scanner;
@@ -152,24 +152,15 @@ async fn main() -> Result<()> {
     let torrents = qbit.get_torrents().await.unwrap_or_default();
 
     let scanner = Scanner::new(download_dir.clone(), config.media_dirs.clone());
-    let mut nodes = scanner.scan().unwrap_or_default();
+    let mut app = App::new(config, Vec::new(), torrents);
 
-    // Enrich nodes with qbit data
-    for node in &mut nodes {
-        for path in &node.paths {
-            let path_str = path.to_string_lossy();
-            for torrent in &torrents {
-                // Heuristic: if torrent name or files match (simplified for mock)
-                if path_str.contains(&torrent.name) {
-                    node.torrent_hash = Some(torrent.hash.clone());
-                    node.is_seeding =
-                        torrent.state.contains("UP") || torrent.state.contains("uploading");
-                }
-            }
-        }
-    }
-
-    let mut app = App::new(config, nodes, torrents);
+    // Initial async scan
+    let (tx, rx) = std::sync::mpsc::channel();
+    scanner.scan_async(tx);
+    app.state = AppState::Scanning {
+        processed: 0,
+        receiver: rx,
+    };
 
     let mut tui = Tui::new()?;
     tui.init()?;
@@ -246,11 +237,12 @@ async fn main() -> Result<()> {
                         KeyCode::Char('r') => {
                             if !app.show_confirmation && !app.search_active {
                                 // Rescan logic
-                                if let Ok(new_nodes) = scanner.scan() {
-                                    app.nodes = new_nodes;
-                                    app.refresh_groups();
-                                    app.selected_index = 0;
-                                }
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                scanner.scan_async(tx);
+                                app.state = AppState::Scanning {
+                                    processed: 0,
+                                    receiver: rx,
+                                };
                             }
                         }
                         KeyCode::Enter => {

@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    app.ensure_groups();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -178,6 +179,55 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         frame.render_widget(paragraph, area);
     }
 
+    // Scanning Overlay
+    match &app.state {
+        crate::app::AppState::Scanning { processed, .. } => {
+            let area = centered_rect(50, 20, frame.size());
+            frame.render_widget(Clear, area);
+            let block = Block::default()
+                .title(" SCANNING ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan).bold());
+            let text = vec![
+                ratatui::text::Line::from("").into(),
+                ratatui::text::Line::from(format!("Processed {} files...", processed))
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .into(),
+                ratatui::text::Line::from("").into(),
+                ratatui::text::Line::from("Please wait...")
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .dim()
+                    .into(),
+            ];
+            let paragraph = Paragraph::new(text).block(block);
+            frame.render_widget(paragraph, area);
+        }
+        crate::app::AppState::Error(e) => {
+            let area = centered_rect(60, 30, frame.size());
+            frame.render_widget(Clear, area);
+            let block = Block::default()
+                .title(" ERROR ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red).bold());
+            let text = vec![
+                ratatui::text::Line::from("Scan failed:").into(),
+                ratatui::text::Line::from("").into(),
+                ratatui::text::Line::from(e.to_string())
+                    .fg(Color::Red)
+                    .into(),
+                ratatui::text::Line::from("").into(),
+                ratatui::text::Line::from("Press 'q' to quit or 'r' to try again.")
+                    .dim()
+                    .into(),
+            ];
+            let paragraph = Paragraph::new(text)
+                .block(block)
+                .wrap(ratatui::widgets::Wrap { trim: true });
+            frame.render_widget(paragraph, area);
+        }
+        _ => {}
+    }
+
     // Footer
     let footer_text = if app.search_active {
         format!(" SEARCH: {}█ (Esc to cancel)", app.search_query)
@@ -251,16 +301,13 @@ fn format_size(bytes: u64) -> String {
 }
 
 fn render_dashboard(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
-    let all_groups = match app.active_tab {
-        Tab::Media => &app.media_groups,
-        Tab::Downloads => &app.download_groups,
-    };
+    let groups = app.current_groups();
 
     let mut total_files = 0;
     let mut total_size = 0;
     let mut saved_size = 0;
 
-    for group in all_groups {
+    for group in groups {
         for node in &group.nodes {
             total_files += 1;
             if node.has_downloads && node.has_media {
