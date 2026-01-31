@@ -36,3 +36,5 @@ integrates with real qBittorrent instances, and provides a context-aware deletio
 2. **Empty Folder Cleanup**: "Container" mode (deleting logical groups) leaves empty parent folders.
 3. **Matching Accuracy**: qBit-to-disk matching uses a name heuristic; ideally, it should use file indices or paths.
 4. **Sort indicator**: Currently added (Shift+S), but needs verification for all sort modes.
+5. **Multi-path Autocompletion**: During interactive setup, when prompted for `media_dirs` (comma-separated), autocompletion only works for the first path.
+    - **Proposed Solution**: Implement a custom `rustyline` Helper/Completer that splits the input by commas and performs path completion only on the substring following the last comma.

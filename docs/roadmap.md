@@ -31,3 +31,5 @@
 1. **Scaling**: Scanning huge libraries (thousands of files) causes a noticeable pause.
 2. **Matching**: Torrent name changes can break current heuristic matching.
 3. **Empty Folders**: Deleting files leaves empty parent folders behind.
+4. **Interactive Setup UX**: Multi-path autocompletion (comma-separated) only works for the first path.
+    - *Plan*: Custom `Completer` for `rustyline` to handle comma-delimited tokens.
