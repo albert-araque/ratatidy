@@ -1,55 +1,40 @@
-# Architecture Overview - Checkpoint 4 (User Feedback Integration)
+# Architecture Overview
 
-`ratatidy` follows a **Single Source of Truth** architecture to ensure data consistency across multiple terminal views (tabs).
+`ratatidy` is a TUI-based media management tool designed to reconcile files between download directories and media libraries, with a focus on preserving and identifying hardlinks.
 
-## Core Philosophy
-1. **Master Node List**: There is only one list of files (`FileNode`).
-2. **Derived Views**: Tabs (Media, Downloads) are just different ways of "grouping" the same master list.
-3. **Hardware Abstraction**: OS-specific logic (Windows Handles vs. Linux Inodes) is isolated in the `Scanner`.
-4. **Optional Integrations**: qBittorrent is optional; if not configured, the tool works as a pure file manager.
+## System Architecture
 
-## Component Breakdown
+The application follows a **Single Source of Truth** model where a master list of physical files is maintained and presented through different filtered and grouped views.
 
-### 1. Data Model (`scanner.rs`, `app.rs`)
-- **`FileKey`**: A unique identifier for a physical file.
-  - Windows: `(VolumeID, FileIndex)` via Win32 API.
-  - Linux/Unix: `(DevID, InodeID)` via `std::os::unix::fs`.
-- **`FileNode`**: Represents a single physical file (which can have multiple hardlinked paths).
-- **`Group`**: A collection of `FileNode`s sharing a logical parent.
+### Key Components
 
-### 2. Configuration (`config.rs`)
-- **Loading Order**: CLI args > Environment variables > Defaults.
-- **Interactive Setup** (Planned): If required paths are missing, prompt user interactively.
-- **Optional qBittorrent**: Works without qBit credentials; seeding info and torrent deletion only available when configured.
+- **Scanner (`scanner.rs`)**: Performs cross-platform directory traversal. It uses OS-specific APIs (Win32 on Windows, MetadataExt on Linux) to identify physical files via Device ID and Inode/File Index.
+- **Data Model (`app.rs` / `scanner.rs`)**:
+    - `FileNode`: Represents a unique physical file on disk.
+    - `Group`: A logical collection of `FileNode` objects (e.g., a Movie folder or a TV show season).
+- **Application State (`app.rs`)**: Manages the master list of `FileNode`s, user interface state (tabs, selection, filters), and coordinates deletions.
+- **qBittorrent Integration (`qbittorrent.rs`)**: An optional module that fetches torrent metadata to enrich `FileNode` info.
+- **User Interface (`ui.rs`)**: A stateless rendering layer built with `ratatui`.
 
-### 3. State Management (`app.rs`)
-- **`App` struct**: The central controller.
-  - Holds `nodes: Vec<FileNode>`.
-  - **`execute_delete()`**: Modifies master nodes, performs disk deletions, queues qBit deletions (if configured).
+## Core Logic Flow Summary
 
-### 4. qBittorrent Integration (`qbittorrent.rs`)
-- **Trait-based API**: Swap between `RealQbitClient` and `MockQbitClient`.
-- **Graceful Fallback**: If credentials missing or connection fails, fall back to offline mode.
+1. **Initialization**: Config is loaded from CLI, environment, or `.env`. If paths are missing, an interactive prompt guides the user.
+2. **Scanning**: The program scans the download and media directories, identifying hardlinked files that share the same physical storage.
+3. **Enrichment**: (Optional) Data from qBittorrent is matched against files to identify seeding status and torrent hashes.
+4. **Interaction Loop**: The TUI allows users to switch between "Media" and "Downloads" views, search, filter, and perform safe, context-aware deletions.
+5. **Execution**: Deletions are processed by updating the master node list, deleting files from disk, and optionally removing torrents from qBittorrent.
 
-### 5. User Interface (`ui.rs`, `tui.rs`)
-- **Ratatui**: Stateless rendering approach.
-- **POV System**: Switching tabs changes grouping context but shows same underlying file statuses.
+> [!TIP]
+> For a more exhaustive technical breakdown of internal logic, see the [Flow Analysis](file:///c:/Users/alber/dev/ratatidy/docs/flow_analysis.md) document.
 
-## Data Flow
+## Data Structure Diagram
+
 ```mermaid
-graph TD
-    Config[Config/Env/Interactive] --> Scanner
-    Scanner -->|Raw Disk Data| Nodes[Master Nodes List]
-    QBit[qBittorrent API Optional] -->|Torrent Info| Nodes
-    Nodes -->|Grouping Logic| Groups[Media/Download Views]
-    Groups -->|Rendering| UI[Ratatui TUI]
-    UI -->|Deletions| Disk[fs::remove_file]
-    UI -->|Deletions if configured| QBitAPI[qBit Delete Command]
-    Disk & QBitAPI -->|Clear Node Path| Nodes
-    Nodes -->|Auto-Refresh| Groups
+graph LR
+    Disk[(Disk/OS)] -->|i-nodes/FileIndex| Scanner
+    Scanner -->|FileNodes| App
+    QBitAPI[qBittorrent] -.->|Metadata| App
+    App -->|Grouped Views| UI
+    UI -->|Actions| App
+    App -->|fs::remove| Disk
 ```
-
-## Performance Considerations (Planned)
-- **Async Scanning**: Move disk I/O off the main thread.
-- **Progress Indicator**: Show feedback during large scans.
-- **Lazy/Cached Loading**: Reduce startup time for multi-TB libraries.

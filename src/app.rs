@@ -18,6 +18,7 @@ pub struct App {
     pub search_query: String,
     pub search_active: bool,
     pub sort_by: SortBy,
+    pub sort_order: SortOrder,
     pub filter: FilterMode,
     pub pending_qbit_deletions: Vec<String>,
 }
@@ -43,13 +44,30 @@ impl FilterMode {
 pub enum SortBy {
     Name,
     Size,
+    DateAdded,
 }
 
 impl SortBy {
     pub fn next(self) -> Self {
         match self {
             SortBy::Name => SortBy::Size,
-            SortBy::Size => SortBy::Name,
+            SortBy::Size => SortBy::DateAdded,
+            SortBy::DateAdded => SortBy::Name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
+impl SortOrder {
+    pub fn toggle(self) -> Self {
+        match self {
+            SortOrder::Ascending => SortOrder::Descending,
+            SortOrder::Descending => SortOrder::Ascending,
         }
     }
 }
@@ -103,8 +121,9 @@ impl App {
             delete_scope: DeleteScope::Downloads,
             available_scopes: Vec::new(),
             search_query: String::new(),
-            search_active: bool::from(false),
+            search_active: false,
             sort_by: SortBy::Name,
+            sort_order: SortOrder::Ascending,
             filter: FilterMode::All,
             pending_qbit_deletions: Vec::new(),
         };
@@ -114,7 +133,9 @@ impl App {
 
     pub fn refresh_groups(&mut self) {
         self.media_groups = group_by_media(&self.nodes, &self.config.media_dirs);
-        self.download_groups = group_by_downloads(&self.nodes, &self.config.download_dir);
+        if let Some(ref download_dir) = self.config.download_dir {
+            self.download_groups = group_by_downloads(&self.nodes, download_dir);
+        }
     }
 
     pub fn toggle_details(&mut self) {
@@ -151,11 +172,33 @@ impl App {
         };
 
         match self.sort_by {
-            SortBy::Name => filtered.sort_by(|a, b| a.title.cmp(&b.title)),
+            SortBy::Name => filtered.sort_by(|a, b| {
+                let cmp = a.title.cmp(&b.title);
+                if self.sort_order == SortOrder::Descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
+            }),
             SortBy::Size => filtered.sort_by(|a, b| {
                 let size_a: u64 = a.nodes.iter().map(|n| n.size).sum();
                 let size_b: u64 = b.nodes.iter().map(|n| n.size).sum();
-                size_b.cmp(&size_a) // Descending size
+                let cmp = size_a.cmp(&size_b).then_with(|| a.title.cmp(&b.title));
+                if self.sort_order == SortOrder::Descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
+            }),
+            SortBy::DateAdded => filtered.sort_by(|a, b| {
+                let date_a = a.nodes.iter().filter_map(|n| n.modified).max();
+                let date_b = b.nodes.iter().filter_map(|n| n.modified).max();
+                let cmp = date_a.cmp(&date_b).then_with(|| a.title.cmp(&b.title));
+                if self.sort_order == SortOrder::Descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
             }),
         }
 
@@ -269,14 +312,20 @@ impl App {
                         false
                     })
                 }),
-                Tab::Downloads => node.paths.iter().any(|p| {
-                    if let Ok(rel) = p.strip_prefix(&self.config.download_dir) {
-                        if let Some(first) = rel.components().next() {
-                            return first.as_os_str().to_string_lossy() == group_title;
-                        }
+                Tab::Downloads => {
+                    if let Some(ref download_dir) = self.config.download_dir {
+                        node.paths.iter().any(|p| {
+                            if let Ok(rel) = p.strip_prefix(download_dir) {
+                                if let Some(first) = rel.components().next() {
+                                    return first.as_os_str().to_string_lossy() == group_title;
+                                }
+                            }
+                            false
+                        })
+                    } else {
+                        false
                     }
-                    false
-                }),
+                }
             };
 
             if !is_in_group {
@@ -287,9 +336,9 @@ impl App {
                 DeleteScope::Downloads => {
                     if let Some(hash) = &node.torrent_hash {
                         hashes_to_delete.push(hash.clone());
-                    } else {
+                    } else if let Some(ref download_dir) = self.config.download_dir {
                         for path in &node.paths {
-                            if path.starts_with(&self.config.download_dir) {
+                            if path.starts_with(download_dir) {
                                 paths_to_remove.push(path.clone());
                             }
                         }
@@ -305,9 +354,9 @@ impl App {
                 DeleteScope::All => {
                     if let Some(hash) = &node.torrent_hash {
                         hashes_to_delete.push(hash.clone());
-                    } else {
+                    } else if let Some(ref download_dir) = self.config.download_dir {
                         for path in &node.paths {
-                            if path.starts_with(&self.config.download_dir) {
+                            if path.starts_with(download_dir) {
                                 paths_to_remove.push(path.clone());
                             }
                         }
@@ -340,10 +389,11 @@ impl App {
             node.paths.retain(|p| !paths_to_remove.contains(p));
 
             // Re-calculate flags
-            node.has_downloads = node
-                .paths
-                .iter()
-                .any(|p| p.starts_with(&self.config.download_dir));
+            node.has_downloads = if let Some(ref download_dir) = self.config.download_dir {
+                node.paths.iter().any(|p| p.starts_with(download_dir))
+            } else {
+                false
+            };
             node.has_media = node
                 .paths
                 .iter()

@@ -44,8 +44,10 @@ QBIT_PASS=mypassword
 - **Arrows/j/k**: Navigate groups.
 - **i**: Toggle details panel (see exact file paths and link status).
 - **/**: Search.
-- **s**: Cycle sort modes (Name, Size).
+- **s**: Cycle sort modes (Name, Size, Date Added).
+- **S**: Toggle sort order (Ascending/Descending).
 - **f**: Cycle filters (All, Orphans, Hardlinked).
+- **r**: Rescan files (refresh without restart).
 - **d**: Open delete/purge menu.
 - **Enter**: Confirm action in menus.
 - **Esc**: Cancel / Close search.

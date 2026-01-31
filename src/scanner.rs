@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
@@ -29,6 +30,7 @@ pub struct FileNode {
     pub has_media: bool,
     pub torrent_hash: Option<String>,
     pub is_seeding: bool,
+    pub modified: Option<SystemTime>,
 }
 
 pub struct Scanner {
@@ -71,8 +73,7 @@ impl Scanner {
             if metadata.is_dir() {
                 self.scan_dir(&path, is_download, nodes)?;
             } else if metadata.is_file() {
-                let key = self.get_file_key(&path, &metadata)?;
-                let nlink = self.get_nlink(&metadata);
+                let (key, nlink) = self.get_file_info(&path, &metadata)?;
 
                 let node = nodes.entry(key).or_insert_with(|| FileNode {
                     key,
@@ -83,6 +84,7 @@ impl Scanner {
                     has_media: false,
                     torrent_hash: None,
                     is_seeding: false,
+                    modified: metadata.created().ok().or_else(|| metadata.modified().ok()),
                 });
 
                 node.paths.push(path);
@@ -97,7 +99,7 @@ impl Scanner {
     }
 
     #[cfg(windows)]
-    fn get_file_key(&self, path: &Path, _metadata: &fs::Metadata) -> Result<FileKey> {
+    fn get_file_info(&self, path: &Path, _metadata: &fs::Metadata) -> Result<(FileKey, u32)> {
         let file = fs::File::open(path)?;
         let handle = file.as_raw_handle();
         let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
@@ -107,30 +109,19 @@ impl Scanner {
             return Err(anyhow::anyhow!("Failed to get file info"));
         }
 
-        Ok(FileKey {
+        let key = FileKey {
             dev: info.dwVolumeSerialNumber as u64,
             inode: ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64),
-        })
+        };
+        Ok((key, info.nNumberOfLinks))
     }
 
     #[cfg(unix)]
-    fn get_file_key(&self, _path: &Path, metadata: &fs::Metadata) -> Result<FileKey> {
-        Ok(FileKey {
+    fn get_file_info(&self, _path: &Path, metadata: &fs::Metadata) -> Result<(FileKey, u32)> {
+        let key = FileKey {
             dev: metadata.dev(),
             inode: metadata.ino(),
-        })
-    }
-
-    #[cfg(windows)]
-    fn get_nlink(&self, _metadata: &fs::Metadata) -> u32 {
-        // We get this from the handle info in get_file_key usually,
-        // but for simplicity we can just return 1 or re-fetch.
-        // For ratatidy, detecting if > 1 is what matters.
-        1
-    }
-
-    #[cfg(unix)]
-    fn get_nlink(&self, metadata: &fs::Metadata) -> u32 {
-        metadata.nlink() as u32
+        };
+        Ok((key, metadata.nlink() as u32))
     }
 }

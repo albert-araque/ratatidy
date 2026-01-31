@@ -1,4 +1,5 @@
 use clap::Parser;
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -7,7 +8,7 @@ use std::path::PathBuf;
 pub struct Config {
     /// Directory where torrents are downloaded
     #[arg(short, long, env = "RATATIDY_DOWNLOAD_DIR")]
-    pub download_dir: PathBuf,
+    pub download_dir: Option<PathBuf>,
 
     /// Directories containing your media library (comma separated)
     #[arg(short, long, env = "RATATIDY_MEDIA_DIRS", value_delimiter = ',')]
@@ -59,16 +60,44 @@ pub struct QBittorrentConfig {
     pub password: Option<String>,
 }
 
+impl QBittorrentConfig {
+    pub fn is_configured(&self) -> bool {
+        self.username.is_some() && self.password.is_some()
+    }
+}
+
 impl Config {
     pub fn load() -> Self {
         Self::parse()
+    }
+
+    pub fn config_path() -> Option<PathBuf> {
+        ProjectDirs::from("", "", "ratatidy").map(|dirs| dirs.config_dir().join("config.toml"))
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        if let Some(path) = Self::config_path() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let toml_str = toml::to_string_pretty(self)?;
+            std::fs::write(&path, toml_str)?;
+            println!("Config saved to: {}", path.display());
+        }
+        Ok(())
+    }
+
+    pub fn load_from_file() -> Option<Self> {
+        let path = Self::config_path()?;
+        let contents = std::fs::read_to_string(&path).ok()?;
+        toml::from_str(&contents).ok()
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            download_dir: PathBuf::from("."),
+            download_dir: None,
             media_dirs: vec![],
             delete_mode: DeleteMode::Container,
             trash_dir: None,

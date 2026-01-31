@@ -8,12 +8,12 @@
 - **Phase 4: Grouping and 2 POVs** [x]
 - **Phase 5: Container Actions (Permanent Delete)** [x]
 - **Phase 6: Filters + Search + Dashboard** [x]
-- **Phase 7: Real API + Portability** [/]
+- **Phase 7: Real API + Portability** [x]
     - [x] `RealQbitClient` implementation.
     - [x] CLI & Environment Variables configuration.
     - [x] Cross-platform support (Debian/Linux via RustTLS).
     - [x] Single Source of Truth Refactor.
-    - [ ] Rescan Logic (`r` key).
+    - [x] Rescan Logic (`r` key).
     - [ ] Empty Folder Cleanup.
 
 ## Current Status
@@ -32,7 +32,7 @@ integrates with real qBittorrent instances, and provides a context-aware deletio
 2. **Planned Fix**: Async scanning with progress indicator.
 
 ## Technical Debt / Known Issues
-1. **Startup Crash**: Missing `download_dir` causes immediate failure.
-2. **Empty Folder Cleanup**: "Container" mode leaves empty parent folders.
-3. **Fragile Matching**: qBit-to-disk matching uses simplified name-contains logic.
-4. **No Rescan**: Must restart app to refresh file list.
+1. **Performance**: Scanning multi-TB libraries (thousands of files) causes a noticeable pause at startup.
+2. **Empty Folder Cleanup**: "Container" mode (deleting logical groups) leaves empty parent folders.
+3. **Matching Accuracy**: qBit-to-disk matching uses a name heuristic; ideally, it should use file indices or paths.
+4. **Sort indicator**: Currently added (Shift+S), but needs verification for all sort modes.

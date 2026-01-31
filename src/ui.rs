@@ -96,10 +96,19 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                         " (ORPHAN-M) ".fg(Color::Magenta)
                     };
 
+                    let date_str = node
+                        .modified
+                        .map(|m| {
+                            let datetime: chrono::DateTime<chrono::Local> = m.into();
+                            datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+                        })
+                        .unwrap_or_else(|| "Unknown date".to_string());
+
                     lines.push(ratatui::text::Line::from(vec![
                         "• ".into(),
                         format_size(node.size).into(),
                         status,
+                        format!(" ({})", date_str).dim(),
                     ]));
 
                     for path in &node.paths {
@@ -173,9 +182,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let footer_text = if app.search_active {
         format!(" SEARCH: {}█ (Esc to cancel)", app.search_query)
     } else {
+        let sort_order_label = match app.sort_order {
+            crate::app::SortOrder::Ascending => "Asc",
+            crate::app::SortOrder::Descending => "Desc",
+        };
+        let sort_order_arrow = match app.sort_order {
+            crate::app::SortOrder::Ascending => "↑",
+            crate::app::SortOrder::Descending => "↓",
+        };
         format!(
-            " Tab | i:Info | d:Delete | s:Sort ({:?}) | f:Filter ({:?}) | /:Search | q:Quit ",
-            app.sort_by, app.filter
+            " Tab | i:Info | d:Delete | s:Sort ({:?}) | S:{} {} | f:Filter ({:?}) | /:Search | q:Quit ",
+            app.sort_by, sort_order_label, sort_order_arrow, app.filter
         )
     };
 

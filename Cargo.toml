@@ -15,6 +15,9 @@ async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 tokio = { version = "1.0", features = ["full"] }
 clap = { version = "4.5.56", features = ["derive", "env"] }
+dotenvy = "0.15"
+rustyline = "15.0"
+chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
