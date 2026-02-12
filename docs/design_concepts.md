@@ -1,4 +1,4 @@
-# Development Plan (Adjusted): Rust TUI for Media Management with Hardlinks
+# Design Concepts: Rust TUI for Media Management with Hardlinks
 
 ## 0) Objective and Problem
 A Rust-based TUI to detect and manage hardlinks between:
@@ -142,30 +142,3 @@ Add:
 - `trash_dir` (recommended).
 - `dry_run` (default `true`).
 - `video_extensions` (only detect videos, but "container" action affects the whole folder).
-
----
-
-## 7) Development Phases
-1. **Phase 1 — Setup + Config + Minimal TUI** [x]
-2. **Phase 2 — (dev, inode) Scanner + FileNode** [x]
-3. **Phase 3 — qBittorrent MVP (Mock API)** [x]
-4. **Phase 4 — Grouping and 2 POVs** [x]
-5. **Phase 5 — "Container" Actions with Trash + Confirmations** [ ]
-6. **Phase 6 — Filters + Search + Dashboard** [ ]
-7. **Phase 7 — Real API + Refinements + Logs** [ ]
-
----
-
-## 8) Risks and Mitigation
-- **Breaking Seeding:** Guards + strong confirmation + default to "Trash."
-- **Deleting Unrelated Files:** Content checks + fallback to file-only or strong confirmation.
-- **Ambiguous qBit Mapping:** Mark confidence level; show "Heuristic Match" in UI.
-
----
-
-## 9) Summary
-Manageable if done incrementally:
-1. File-level (hardlinks).
-2. qBittorrent mapping.
-3. Grouping + 2 POVs.
-4. Container-based actions with safety.
