@@ -34,6 +34,11 @@ The application is fully functional for its core purpose: detecting and managing
 ### Near Term (Polishing)
 - [ ] **Empty Folder Cleanup**: Automatically remove parent directories when they become empty after a purge.
 - [ ] **Trash Support**: Move files to a `.trash` or recycle bin instead of permanent deletion (`t` key).
+- [x] **Expanded Tab Navigation**:
+    - **Tab 1**: General "Media" (Aggregated view).
+    - **Tabs 2..N**: Individual tabs for each configured media folder.
+    - **Last Tab**: Downloads.
+    - Support numeric navigation (1-9) and linear cycling with Tab key.
 
 ### Medium Term (robustness)
 - [ ] **Inode-based Matching**: Improve qBittorrent matching accuracy by using absolute paths instead of name heuristics.

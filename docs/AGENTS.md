@@ -32,6 +32,6 @@
 - **Build**: `cargo build --release`
 
 ## 5. Development Rules
-- **Documentation**: Update `docs/implementation_state.md` immediately after completing a feature.
+- **Documentation**: Update `docs/implementation_state.md` immediately after completing a feature. Delete the feature from the list of pending features and add it to the current features.
 - **Concurrency**: Do not block the main TUI thread. Use channels for heavy lifting.
 - **UI UX**: Prioritize responsiveness. Keep the "Game Loop" fast.

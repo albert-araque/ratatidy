@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::grouping::{Group, group_by_downloads, group_by_media};
 use crate::qbittorrent::TorrentInfo;
 use crate::scanner::FileNode;
+use std::collections::HashMap;
 
 static EMPTY_GROUPS: Vec<Group> = Vec::new();
 
@@ -9,8 +10,9 @@ pub struct App {
     pub config: Config,
     pub running: bool,
     pub active_tab: Tab,
-    pub media_groups: Option<Vec<Group>>,
-    pub download_groups: Option<Vec<Group>>,
+    pub media_groups: Option<Vec<Group>>, // For Tab::Media (Aggregated)
+    pub folder_groups: HashMap<usize, Vec<Group>>, // For Tab::MediaFolder(i)
+    pub download_groups: Option<Vec<Group>>, // For Tab::Downloads
     pub nodes: Vec<FileNode>,
     pub selected_index: usize,
     pub show_details: bool,
@@ -117,6 +119,7 @@ impl DeleteScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Media,
+    MediaFolder(usize),
     Downloads,
 }
 
@@ -127,6 +130,7 @@ impl App {
             running: true,
             active_tab: Tab::Media,
             media_groups: None,
+            folder_groups: HashMap::new(),
             download_groups: None,
             nodes,
             selected_index: 0,
@@ -149,6 +153,7 @@ impl App {
 
     pub fn refresh_groups(&mut self) {
         self.media_groups = None;
+        self.folder_groups.clear();
         self.download_groups = None;
     }
 
@@ -157,11 +162,26 @@ impl App {
     }
 
     pub fn ensure_groups(&mut self) {
-        if self.active_tab == Tab::Media && self.media_groups.is_none() {
-            self.media_groups = Some(group_by_media(&self.nodes, &self.config.media_dirs));
-        } else if self.active_tab == Tab::Downloads && self.download_groups.is_none() {
-            if let Some(ref download_dir) = self.config.download_dir {
-                self.download_groups = Some(group_by_downloads(&self.nodes, download_dir));
+        match self.active_tab {
+            Tab::Media => {
+                if self.media_groups.is_none() {
+                    self.media_groups = Some(group_by_media(&self.nodes, &self.config.media_dirs));
+                }
+            }
+            Tab::MediaFolder(idx) => {
+                if !self.folder_groups.contains_key(&idx) {
+                    if let Some(dir) = self.config.media_dirs.get(idx) {
+                        let groups = group_by_media(&self.nodes, &[dir.clone()]);
+                        self.folder_groups.insert(idx, groups);
+                    }
+                }
+            }
+            Tab::Downloads => {
+                if self.download_groups.is_none() {
+                    if let Some(ref download_dir) = self.config.download_dir {
+                        self.download_groups = Some(group_by_downloads(&self.nodes, download_dir));
+                    }
+                }
             }
         }
     }
@@ -169,6 +189,7 @@ impl App {
     pub fn current_groups(&self) -> Vec<&Group> {
         let groups = match self.active_tab {
             Tab::Media => self.media_groups.as_ref().unwrap_or(&EMPTY_GROUPS),
+            Tab::MediaFolder(idx) => self.folder_groups.get(&idx).unwrap_or(&EMPTY_GROUPS),
             Tab::Downloads => self.download_groups.as_ref().unwrap_or(&EMPTY_GROUPS),
         };
 
@@ -290,12 +311,37 @@ impl App {
         self.running = false;
     }
 
+    // Helper to generate the list of tabs based on current config
+    pub fn get_tabs_list(&self) -> Vec<Tab> {
+        let mut tabs = vec![Tab::Media];
+
+        // Only show individual folders if there's more than 1
+        if self.config.media_dirs.len() > 1 {
+            for i in 0..self.config.media_dirs.len() {
+                tabs.push(Tab::MediaFolder(i));
+            }
+        }
+
+        tabs.push(Tab::Downloads);
+        tabs
+    }
+
     pub fn next_tab(&mut self) {
-        self.active_tab = match self.active_tab {
-            Tab::Media => Tab::Downloads,
-            Tab::Downloads => Tab::Media,
-        };
-        self.selected_index = 0;
+        let tabs = self.get_tabs_list();
+        if let Some(pos) = tabs.iter().position(|t| *t == self.active_tab) {
+            self.active_tab = tabs[(pos + 1) % tabs.len()];
+            self.selected_index = 0;
+        }
+    }
+
+    // Jump to a specific tab index (0-based) from the UI/keyboard perspective
+    // 0: Media, 1..N: Folders (if any), Last: Downloads
+    pub fn set_tab_index(&mut self, index: usize) {
+        let tabs = self.get_tabs_list();
+        if index < tabs.len() {
+            self.active_tab = tabs[index];
+            self.selected_index = 0;
+        }
     }
 
     pub fn request_delete(&mut self) {
@@ -371,6 +417,20 @@ impl App {
                         false
                     })
                 }),
+                Tab::MediaFolder(idx) => {
+                    if let Some(m) = self.config.media_dirs.get(idx) {
+                        node.paths.iter().any(|p| {
+                            if let Ok(rel) = p.strip_prefix(m) {
+                                if let Some(first) = rel.components().next() {
+                                    return first.as_os_str().to_string_lossy() == group_title;
+                                }
+                            }
+                            false
+                        })
+                    } else {
+                        false
+                    }
+                }
                 Tab::Downloads => {
                     if let Some(ref download_dir) = self.config.download_dir {
                         node.paths.iter().any(|p| {

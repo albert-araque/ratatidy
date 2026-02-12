@@ -42,10 +42,14 @@ Once the file system is mapped:
 The application runs a standard "Game Loop" at ~60fps (16ms poll):
 
 1.  **Stateless Rendering**: `ui::render` takes the current `app` state and draws the entire screen.
-    - **Tabs**: "POV" (Point of View) switch. Tab 1 shows `media_groups`, Tab 2 shows `download_groups`.
+    - **Tabs**: "POV" (Point of View) switch.
+        - **Media (Tab 1)**: Aggregated view of all media folders.
+        - **Folder Tabs (Tab 2..N)**: Individual views for each specific media directory (e.g., Movies, TV).
+        - **Downloads (Last Tab)**: View of the download directory.
     - **Details Panel**: Shows the exact paths and link status for the selected group.
 2.  **Event Handling**: Keypresses mutate the `App` struct.
-    - `Tab`: Toggles `active_tab`.
+    - **`Tab`**: Cycles linearly through all available tabs (`Media` -> `Folder 1` -> ... -> `Downloads` -> `Media`).
+    - **`1-9`**: Jumps directly to the corresponding tab index.
     - `f`: Cycles `filter` (All -> Orphans -> Hardlinked).
     - `s/S`: Changes `sort_by` and `sort_order`.
 3.  **Master Node Filtering**: When you apply a filter, the `App` recalculates which `Groups` contain `FileNode`s matching that filter.

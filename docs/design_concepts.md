@@ -24,8 +24,11 @@ A Rust-based TUI to detect and manage hardlinks between:
 
 ---
 
-## 2) New Approach: 2 POVs (Media vs. Downloads)
-Layer-based approach.
+## 2) New Approach: Multiple POVs (Dynamic Tabs)
+Tabs are generated dynamically based on configuration:
+1. **Media (Global)**: Aggregated view of all items across all media folders.
+2. **Media Folder 1..N**: Specific views for each configured folder (e.g. Movies, TV).
+3. **Downloads**: View of the download library.
 
 ### POV 1 — Media
 List of **Movies/Series** (grouped by folder in `/media`), showing:
@@ -120,7 +123,8 @@ struct Group {
 - **Footer:** Shortcuts.
 
 ### Controls
-- **Tab:** Switch POV (Media / Downloads).
+- **`Tab`**: Cycle through tabs linearly (Media -> Media Folder 1 -> ... -> Downloads).
+- **`1-9`**: Jump directly to tab N.
 - **`/`**: Search.
 - **`f`**: Filters (orphans, seeding, media-only, downloads-only).
 - **`Enter`**: Open detail / expand group.

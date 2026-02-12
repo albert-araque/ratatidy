@@ -237,6 +237,16 @@ async fn main() -> Result<()> {
                             app.search_query.pop();
                             app.selected_index = 0;
                         }
+                        KeyCode::Char(c)
+                            if !app.search_active
+                                && !app.show_confirmation
+                                && c.is_ascii_digit()
+                                && c != '0' =>
+                        {
+                            if let Some(digit) = c.to_digit(10) {
+                                app.set_tab_index((digit - 1) as usize);
+                            }
+                        }
                         KeyCode::Char('q') => app.quit(),
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::Down | KeyCode::Char('j') => {

@@ -31,11 +31,34 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .split(chunks[2]);
 
     // Tabs
-    let titles = vec!["[1] Media", "[2] Downloads"];
-    let index = match app.active_tab {
-        Tab::Media => 0,
-        Tab::Downloads => 1,
-    };
+    let tabs_list = app.get_tabs_list();
+    let titles: Vec<String> = tabs_list
+        .iter()
+        .enumerate()
+        .map(|(i, tab)| {
+            let name = match tab {
+                Tab::Media => "Media".to_string(),
+                Tab::MediaFolder(idx) => {
+                    if let Some(path) = app.config.media_dirs.get(*idx) {
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                    } else {
+                        format!("Media {}", idx + 1)
+                    }
+                }
+                Tab::Downloads => "Downloads".to_string(),
+            };
+            format!("[{}] {}", i + 1, name)
+        })
+        .collect();
+
+    let index = tabs_list
+        .iter()
+        .position(|t| *t == app.active_tab)
+        .unwrap_or(0);
+
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" ratatidy "))
         .select(index)
