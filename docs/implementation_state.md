@@ -27,14 +27,9 @@ integrates with real qBittorrent instances, and provides a context-aware deletio
 2. **Optional qBittorrent**: Allow running without qBit credentials (offline mode).
 3. **dotenvy Support**: Automatically load `.env` from current directory.
 
-### Performance
-1. **Slow Startup**: Scanning 2-3TB libraries with thousands of files causes noticeable delay.
-2. **Planned Fix**: Async scanning with progress indicator.
-
 ## Technical Debt / Known Issues
-1. **Performance**: Scanning multi-TB libraries (thousands of files) causes a noticeable pause at startup.
-2. **Empty Folder Cleanup**: "Container" mode (deleting logical groups) leaves empty parent folders.
+1. **Empty Folder Cleanup**: "Container" mode (deleting logical groups) leaves empty parent folders.
 3. **Matching Accuracy**: qBit-to-disk matching uses a name heuristic; ideally, it should use file indices or paths.
 4. **Sort indicator**: Currently added (Shift+S), but needs verification for all sort modes.
-5. **Multi-path Autocompletion**: During interactive setup, when prompted for `media_dirs` (comma-separated), autocompletion only works for the first path.
-    - **Proposed Solution**: Implement a custom `rustyline` Helper/Completer that splits the input by commas and performs path completion only on the substring following the last comma.
+5. **Multi-path Autocompletion** [x]: Interactive setup now supports multi-path comma-separated autocompletion.
+    - **Implemented Solution**: Custom `rustyline` Helper/Completer correctly handles splitting by commas.

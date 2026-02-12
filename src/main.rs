@@ -55,6 +55,54 @@ impl Highlighter for FilePathHelper {}
 impl Validator for FilePathHelper {}
 impl Helper for FilePathHelper {}
 
+// Custom helper for multi-path completion (comma separated)
+struct MultiPathHelper {
+    completer: FilenameCompleter,
+}
+
+impl MultiPathHelper {
+    fn new() -> Self {
+        Self {
+            completer: FilenameCompleter::new(),
+        }
+    }
+}
+
+impl Completer for MultiPathHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let (start, path_part) = if let Some(last_comma) = line[..pos].rfind(',') {
+            (last_comma + 1, &line[last_comma + 1..pos])
+        } else {
+            (0, &line[..pos])
+        };
+
+        let trimmed_start = path_part.len() - path_part.trim_start().len();
+        let relative_start = start + trimmed_start;
+        let p_part = path_part.trim_start();
+
+        // Delegate completion to the underlying filename completer with the partial path
+        let (idx, candidates) = self.completer.complete(p_part, p_part.len(), ctx)?;
+
+        // Adjust the index to be absolute to the line
+        Ok((relative_start + idx, candidates))
+    }
+}
+
+impl Hinter for MultiPathHelper {
+    type Hint = String;
+}
+
+impl Highlighter for MultiPathHelper {}
+impl Validator for MultiPathHelper {}
+impl Helper for MultiPathHelper {}
+
 fn prompt_path(message: &str) -> Result<PathBuf> {
     let config = RlConfig::builder()
         .completion_type(CompletionType::List)
@@ -77,9 +125,10 @@ fn prompt_paths(message: &str) -> Result<Vec<PathBuf>> {
     let config = RlConfig::builder()
         .completion_type(CompletionType::List)
         .build();
-    let mut rl: Editor<FilePathHelper, rustyline::history::DefaultHistory> =
+    // Use MultiPathHelper here
+    let mut rl: Editor<MultiPathHelper, rustyline::history::DefaultHistory> =
         Editor::with_config(config)?;
-    rl.set_helper(Some(FilePathHelper::new()));
+    rl.set_helper(Some(MultiPathHelper::new()));
 
     let prompt = format!("{}: ", message);
     let input = rl.readline(&prompt)?;
