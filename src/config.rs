@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[command(author, version, about, long_about = None)]
+// Missing keys take defaults, so a PC's config.toml can hold just `remote = "..."`
+#[serde(default)]
 pub struct Config {
     /// Directory where torrents are downloaded
     #[arg(short, long, env = "RATATIDY_DOWNLOAD_DIR")]
@@ -32,6 +34,22 @@ pub struct Config {
 
     #[command(flatten)]
     pub qbittorrent: QBittorrentConfig,
+
+    /// SSH alias of a Remote host; when set, an Agent there does the scanning and deleting
+    #[arg(long, env = "RATATIDY_REMOTE")]
+    #[serde(default)]
+    pub remote: Option<String>,
+
+    /// Path of the ratatidy binary on the Remote
+    #[arg(long, default_value = DEFAULT_REMOTE_AGENT, env = "RATATIDY_REMOTE_AGENT")]
+    #[serde(default = "default_remote_agent")]
+    pub remote_agent: String,
+}
+
+const DEFAULT_REMOTE_AGENT: &str = "~/.local/bin/ratatidy";
+
+fn default_remote_agent() -> String {
+    DEFAULT_REMOTE_AGENT.to_string()
 }
 
 #[derive(clap::ValueEnum, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -60,15 +78,14 @@ pub struct QBittorrentConfig {
     pub password: Option<String>,
 }
 
-impl QBittorrentConfig {
-    pub fn is_configured(&self) -> bool {
-        self.username.is_some() && self.password.is_some()
-    }
-}
-
 impl Config {
     pub fn load() -> Self {
         Self::parse()
+    }
+
+    /// Config from env vars only, for when argv belongs to a subcommand (the Agent)
+    pub fn from_env() -> Self {
+        Self::parse_from(["ratatidy"])
     }
 
     pub fn config_path() -> Option<PathBuf> {
@@ -108,6 +125,8 @@ impl Default for Config {
                 username: None,
                 password: None,
             },
+            remote: None,
+            remote_agent: default_remote_agent(),
         }
     }
 }

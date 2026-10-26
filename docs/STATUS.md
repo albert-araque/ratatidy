@@ -25,6 +25,10 @@ The application is fully functional for its core purpose: detecting and managing
 - [x] **Sort**: Sort by Name, Size, or Date (`s` / `S` keys).
 - [x] **Rescan**: Trigger a rescan without restarting (`r` key).
 
+### Remote
+- [x] **Remote mode**: TUI on the PC, Agent on the server over SSH (`ratatidy agent info|scan|delete`, protocol-versioned).
+- [x] **Transfer**: queue rsync copies of Media Groups from the Remote to the PC (`c` key), with progress and quit guard.
+
 ### Safety
 - [x] **Context-Aware Delete**: Options to delete from Media, Downloads, or Both.
 - [x] **Sync Deletion**: Deleting from "Downloads" scope also removes the torrent from qBittorrent.
@@ -46,7 +50,6 @@ The application is fully functional for its core purpose: detecting and managing
 
 ### Long Term
 - [ ] **Web UI**: A read-only web dashboard for remote viewing.
-- [ ] **Remote Scan**: Agent-based scanning for remote servers via SSH.
 
 ## 4. Known Issues
 1. **Empty Folder Clutter**: "Container" deletion mode works great for files, but leaves empty directories behind.

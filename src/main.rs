@@ -1,14 +1,17 @@
+mod agent;
 mod app;
 mod config;
 mod grouping;
+mod host;
 mod qbittorrent;
 mod scanner;
+mod transfer;
 mod tui;
 mod ui;
 
 use crate::app::{App, AppState};
 use crate::config::Config;
-use crate::qbittorrent::{MockQbitClient, QbitClient, RealQbitClient};
+use crate::host::{Host, Remote};
 use crate::scanner::Scanner;
 use crate::tui::Tui;
 use anyhow::Result;
@@ -19,6 +22,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{CompletionType, Config as RlConfig, Context, Editor, Helper};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 // Custom helper for path completion
@@ -146,8 +150,202 @@ async fn main() -> Result<()> {
     // Load .env file if it exists
     dotenvy::dotenv().ok();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("agent") {
+        return agent::run(args.get(2).map(String::as_str)).await;
+    }
+
     // Try to load saved config first, fall back to CLI/env
-    let mut config = Config::load_from_file().unwrap_or_else(Config::load);
+    let cli = Config::load();
+    let mut config = Config::load_from_file().unwrap_or_else(|| cli.clone());
+    // A Remote given on the command line wins over the saved config
+    if cli.remote.is_some() {
+        config.remote = cli.remote.clone();
+        config.remote_agent = cli.remote_agent.clone();
+    }
+
+    let (host, torrents) = match config.remote.clone() {
+        Some(alias) => {
+            let remote = Remote {
+                alias,
+                agent: config.remote_agent.clone(),
+            };
+            println!("Connecting to Agent on '{}'...", remote.alias);
+            let info = remote.info()?;
+            config.download_dir = Some(info.download_dir);
+            config.media_dirs = info.media_dirs;
+            (Host::Remote(remote), info.torrents)
+        }
+        None => setup_local(&mut config).await?,
+    };
+    let host = Arc::new(host);
+    let mut app = App::new(config, Vec::new(), torrents);
+
+    // Initial async scan
+    let (tx, rx) = std::sync::mpsc::channel();
+    host.scan_async(tx);
+    app.state = AppState::Scanning {
+        processed: 0,
+        receiver: rx,
+    };
+
+    let (delete_tx, delete_rx) = std::sync::mpsc::channel::<Vec<String>>();
+
+    let mut tui = Tui::new()?;
+    tui.init()?;
+
+    while app.running {
+        tui.terminal.draw(|f| ui::render(&mut app, f))?;
+
+        if event::poll(Duration::from_millis(16))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    if let Some(input) = app.transfer_prompt.as_mut() {
+                        match key.code {
+                            KeyCode::Esc => app.transfer_prompt = None,
+                            KeyCode::Enter => app.confirm_transfer(),
+                            KeyCode::Tab => *input = transfer::complete_dir(input),
+                            KeyCode::Backspace => {
+                                input.pop();
+                            }
+                            KeyCode::Char(c) => input.push(c),
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    if app.confirm_quit {
+                        match key.code {
+                            KeyCode::Enter => app.confirm_quit(),
+                            KeyCode::Esc => app.confirm_quit = false,
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    match key.code {
+                        KeyCode::Esc => {
+                            if app.show_confirmation {
+                                app.cancel_delete();
+                            } else if app.search_active {
+                                app.search_active = false;
+                                app.search_query.clear();
+                            }
+                        }
+                        KeyCode::Char(c) if app.search_active => {
+                            app.search_query.push(c);
+                            app.selected_index = 0;
+                        }
+                        KeyCode::Backspace if app.search_active => {
+                            app.search_query.pop();
+                            app.selected_index = 0;
+                        }
+                        KeyCode::Char(c)
+                            if !app.search_active
+                                && !app.show_confirmation
+                                && c.is_ascii_digit()
+                                && c != '0' =>
+                        {
+                            if let Some(digit) = c.to_digit(10) {
+                                app.set_tab_index((digit - 1) as usize);
+                            }
+                        }
+                        KeyCode::Char('q') => app.request_quit(),
+                        KeyCode::Tab => app.next_tab(),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.show_confirmation {
+                                app.delete_scope = app.delete_scope.next(&app.available_scopes);
+                            } else {
+                                app.select_next();
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.show_confirmation {
+                                app.delete_scope = app.delete_scope.prev(&app.available_scopes);
+                            } else {
+                                app.select_prev();
+                            }
+                        }
+                        KeyCode::Char('i') => {
+                            if !app.show_confirmation {
+                                app.toggle_details();
+                            }
+                        }
+                        KeyCode::Char('t') | KeyCode::Char('d') => {
+                            if !app.show_confirmation {
+                                app.request_delete();
+                            }
+                        }
+                        KeyCode::Char('c') => {
+                            if !app.show_confirmation {
+                                app.request_transfer();
+                            }
+                        }
+                        KeyCode::Char('f') => {
+                            if !app.show_confirmation && !app.search_active {
+                                app.filter = app.filter.next();
+                            }
+                        }
+                        KeyCode::Char('s') => {
+                            if !app.show_confirmation && !app.search_active {
+                                app.sort_by = app.sort_by.next();
+                            }
+                        }
+                        KeyCode::Char('S') => {
+                            if !app.show_confirmation && !app.search_active {
+                                app.sort_order = app.sort_order.toggle();
+                            }
+                        }
+                        KeyCode::Char('/') => {
+                            if !app.show_confirmation {
+                                app.search_active = true;
+                            }
+                        }
+                        KeyCode::Char('r') => {
+                            if !app.show_confirmation && !app.search_active {
+                                // Rescan logic
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                host.scan_async(tx);
+                                app.state = AppState::Scanning {
+                                    processed: 0,
+                                    receiver: rx,
+                                };
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.show_confirmation {
+                                app.confirm_delete();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Hand deletions to the Host off the UI thread (remote ones go over SSH)
+        if !app.pending_path_deletions.is_empty() || !app.pending_qbit_deletions.is_empty() {
+            let paths = std::mem::take(&mut app.pending_path_deletions);
+            let hashes = std::mem::take(&mut app.pending_qbit_deletions);
+            let host = Arc::clone(&host);
+            let delete_tx = delete_tx.clone();
+            tokio::spawn(async move {
+                let _ = delete_tx.send(host.delete(paths, hashes).await);
+            });
+        }
+        while let Ok(errors) = delete_rx.try_recv() {
+            if !errors.is_empty() {
+                app.status = Some(format!("Delete errors: {}", errors.join("; ")));
+            }
+        }
+
+        app.tick();
+    }
+
+    tui.restore()?;
+    Ok(())
+}
+
+/// Local Host: prompts for missing paths and connects to qBittorrent directly
+async fn setup_local(config: &mut Config) -> Result<(Host, Vec<qbittorrent::TorrentInfo>)> {
     let mut config_was_prompted = false;
 
     // Development helper: If no dirs provided and mock_env exists, use it
@@ -182,150 +380,9 @@ async fn main() -> Result<()> {
     let download_dir = config.download_dir.clone().unwrap();
 
     // Phase 7: Fetch qBittorrent data (optional)
-    let qbit: Box<dyn QbitClient> = if Path::new("mock_env").exists() {
-        Box::new(MockQbitClient)
-    } else if config.qbittorrent.is_configured() {
-        match RealQbitClient::new(
-            &config.qbittorrent.url,
-            config.qbittorrent.username.clone(),
-            config.qbittorrent.password.clone(),
-        )
-        .await
-        {
-            Ok(client) => Box::new(client),
-            Err(_) => Box::new(MockQbitClient), // Fallback if connection fails
-        }
-    } else {
-        Box::new(MockQbitClient) // No credentials configured
-    };
+    let qbit = qbittorrent::connect(&config.qbittorrent, Path::new("mock_env").exists()).await;
     let torrents = qbit.get_torrents().await.unwrap_or_default();
 
-    let scanner = Scanner::new(download_dir.clone(), config.media_dirs.clone());
-    let mut app = App::new(config, Vec::new(), torrents);
-
-    // Initial async scan
-    let (tx, rx) = std::sync::mpsc::channel();
-    scanner.scan_async(tx);
-    app.state = AppState::Scanning {
-        processed: 0,
-        receiver: rx,
-    };
-
-    let mut tui = Tui::new()?;
-    tui.init()?;
-
-    while app.running {
-        tui.terminal.draw(|f| ui::render(&mut app, f))?;
-
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Esc => {
-                            if app.show_confirmation {
-                                app.cancel_delete();
-                            } else if app.search_active {
-                                app.search_active = false;
-                                app.search_query.clear();
-                            }
-                        }
-                        KeyCode::Char(c) if app.search_active => {
-                            app.search_query.push(c);
-                            app.selected_index = 0;
-                        }
-                        KeyCode::Backspace if app.search_active => {
-                            app.search_query.pop();
-                            app.selected_index = 0;
-                        }
-                        KeyCode::Char(c)
-                            if !app.search_active
-                                && !app.show_confirmation
-                                && c.is_ascii_digit()
-                                && c != '0' =>
-                        {
-                            if let Some(digit) = c.to_digit(10) {
-                                app.set_tab_index((digit - 1) as usize);
-                            }
-                        }
-                        KeyCode::Char('q') => app.quit(),
-                        KeyCode::Tab => app.next_tab(),
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if app.show_confirmation {
-                                app.delete_scope = app.delete_scope.next(&app.available_scopes);
-                            } else {
-                                app.select_next();
-                            }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if app.show_confirmation {
-                                app.delete_scope = app.delete_scope.prev(&app.available_scopes);
-                            } else {
-                                app.select_prev();
-                            }
-                        }
-                        KeyCode::Char('i') => {
-                            if !app.show_confirmation {
-                                app.toggle_details();
-                            }
-                        }
-                        KeyCode::Char('t') | KeyCode::Char('d') => {
-                            if !app.show_confirmation {
-                                app.request_delete();
-                            }
-                        }
-                        KeyCode::Char('f') => {
-                            if !app.show_confirmation && !app.search_active {
-                                app.filter = app.filter.next();
-                            }
-                        }
-                        KeyCode::Char('s') => {
-                            if !app.show_confirmation && !app.search_active {
-                                app.sort_by = app.sort_by.next();
-                            }
-                        }
-                        KeyCode::Char('S') => {
-                            if !app.show_confirmation && !app.search_active {
-                                app.sort_order = app.sort_order.toggle();
-                            }
-                        }
-                        KeyCode::Char('/') => {
-                            if !app.show_confirmation {
-                                app.search_active = true;
-                            }
-                        }
-                        KeyCode::Char('r') => {
-                            if !app.show_confirmation && !app.search_active {
-                                // Rescan logic
-                                let (tx, rx) = std::sync::mpsc::channel();
-                                scanner.scan_async(tx);
-                                app.state = AppState::Scanning {
-                                    processed: 0,
-                                    receiver: rx,
-                                };
-                            }
-                        }
-                        KeyCode::Enter => {
-                            if app.show_confirmation {
-                                app.confirm_delete();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        // Process qBit deletions
-        if !app.pending_qbit_deletions.is_empty() {
-            let hashes: Vec<String> = app.pending_qbit_deletions.drain(..).collect();
-            for hash in hashes {
-                let _ = qbit.delete_torrent(&hash, true).await;
-            }
-        }
-
-        app.tick();
-    }
-
-    tui.restore()?;
-    Ok(())
+    let scanner = Scanner::new(download_dir, config.media_dirs.clone());
+    Ok((Host::Local { scanner, qbit }, torrents))
 }
