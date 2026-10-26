@@ -14,7 +14,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             Constraint::Length(3), // Header/Tabs
             Constraint::Length(3), // Dashboard
             Constraint::Min(0),    // Main Content + Sidebar
-            Constraint::Length(3), // Footer
+            Constraint::Length(4), // Footer: status line + keys
         ])
         .split(frame.size());
 
@@ -59,8 +59,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .position(|t| *t == app.active_tab)
         .unwrap_or(0);
 
+    let header_title = match &app.config.remote {
+        Some(alias) => format!(" ratatidy @ {} ", alias),
+        None => " ratatidy ".to_string(),
+    };
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" ratatidy "))
+        .block(Block::default().borders(Borders::ALL).title(header_title))
         .select(index)
         .highlight_style(Style::default().fg(Color::Yellow).bold());
     frame.render_widget(tabs, chunks[0]);
@@ -263,13 +267,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             crate::app::SortOrder::Ascending => "↑",
             crate::app::SortOrder::Descending => "↓",
         };
+        let transfer_key = if app.can_transfer() { "c:Transfer | " } else { "" };
         format!(
-            " Tab | i:Info | d:Delete | s:Sort ({:?}) | S:{} {} | f:Filter ({:?}) | /:Search | q:Quit ",
-            app.sort_by, sort_order_label, sort_order_arrow, app.filter
+            " Tab | i:Info | d:Delete | {}s:Sort ({:?}) | S:{} {} | f:Filter ({:?}) | /:Search | q:Quit ",
+            transfer_key, app.sort_by, sort_order_label, sort_order_arrow, app.filter
         )
     };
 
-    let footer = Paragraph::new(footer_text)
+    let footer = Paragraph::new(vec![
+        ratatui::text::Line::from(status_line(app)).fg(Color::Cyan),
+        ratatui::text::Line::from(footer_text),
+    ])
         .block(Block::default().borders(Borders::ALL))
         .style(if app.search_active {
             Style::default().fg(Color::Cyan).bold()
@@ -280,6 +288,64 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     // Dashboard
     render_dashboard(app, frame, chunks[1]);
+
+    if let Some(input) = &app.transfer_prompt {
+        let area = centered_rect(70, 20, frame.size());
+        frame.render_widget(Clear, area);
+        let title = app
+            .current_groups()
+            .get(app.selected_index)
+            .map(|g| g.title.clone())
+            .unwrap_or_default();
+        let text = vec![
+            ratatui::text::Line::from(format!("Copy '{}' into:", title)),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(format!("{}█", input)).fg(Color::Cyan).bold(),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("(Tab to complete / Enter to queue / Esc to cancel)").dim(),
+        ];
+        let paragraph = Paragraph::new(text).block(
+            Block::default()
+                .title(" TRANSFER ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan).bold()),
+        );
+        frame.render_widget(paragraph, area);
+    }
+
+    if app.confirm_quit {
+        let area = centered_rect(50, 20, frame.size());
+        frame.render_widget(Clear, area);
+        let text = vec![
+            ratatui::text::Line::from("Transfers are still running."),
+            ratatui::text::Line::from("Quitting cancels them; they resume next time."),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("(Enter to quit / Esc to stay)").dim(),
+        ];
+        let paragraph = Paragraph::new(text)
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(
+                Block::default()
+                    .title(" QUIT? ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow).bold()),
+            );
+        frame.render_widget(paragraph, area);
+    }
+}
+
+/// Running Transfer and queue size, else the last status message
+fn status_line(app: &App) -> String {
+    if let Some(transfers) = &app.transfers {
+        if let Some((t, percent)) = transfers.active() {
+            let queued = match transfers.pending_len() {
+                0 => String::new(),
+                n => format!(" (+{} queued)", n),
+            };
+            return format!(" ⇣ {} {}%{}", t.title, percent, queued);
+        }
+    }
+    app.status.as_deref().map(|s| format!(" {}", s)).unwrap_or_default()
 }
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`

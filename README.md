@@ -39,6 +39,29 @@ QBIT_USER=admin
 QBIT_PASS=mypassword
 ```
 
+## 🛰️ Remote mode (run the TUI on your PC)
+
+Ratatidy can run on your PC while an **Agent** (the same binary) does the scanning, deleting and qBittorrent work on the server over SSH (see `docs/adr/0001-agent-remoto-por-ssh.md`).
+
+1. On the server, configure ratatidy as usual (`~/.config/ratatidy/config.toml`) and install `rsync`.
+2. Build a static binary on your PC and copy it to the server:
+   ```bash
+   nix develop .#musl -c cargo build --release
+   ssh <alias> mkdir -p .local/bin
+   scp target/x86_64-unknown-linux-musl/release/ratatidy <alias>:.local/bin/ratatidy
+   ```
+3. On your PC (needs `ssh` and `rsync`; key-based auth, no password prompts):
+   ```bash
+   ratatidy --remote <alias>            # or RATATIDY_REMOTE / `remote = "<alias>"` in config.toml
+   ```
+   `<alias>` is a host from `~/.ssh/config`. The Agent path defaults to `~/.local/bin/ratatidy`; override it with `--remote-agent`.
+
+In remote mode, **c** on a Media tab queues a **Transfer**: an rsync copy of the selected Group's folder to a directory on your PC (Tab completes paths, the last one is remembered). Transfers run one at a time in the background; quitting asks first and cancels them, and rsync resumes next time.
+
+## 🧑‍💻 Development
+
+`nix develop` gives a shell with Rust, rust-analyzer, rsync and ssh.
+
 ## ⌨️ Controls
 - **Tab**: Switch between Media and Downloads views.
 - **Arrows/j/k**: Navigate groups.
@@ -49,6 +72,7 @@ QBIT_PASS=mypassword
 - **f**: Cycle filters (All, Orphans, Hardlinked).
 - **r**: Rescan files (refresh without restart).
 - **d**: Open delete/purge menu.
+- **c**: Transfer the selected Group to this PC (remote mode, Media tabs).
 - **Enter**: Confirm action in menus.
 - **Esc**: Cancel / Close search.
 - **q**: Quit.

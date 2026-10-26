@@ -2,7 +2,9 @@ use crate::config::Config;
 use crate::grouping::{Group, group_by_downloads, group_by_media};
 use crate::qbittorrent::TorrentInfo;
 use crate::scanner::FileNode;
+use crate::transfer::{self, Transfer, TransferQueue};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 static EMPTY_GROUPS: Vec<Group> = Vec::new();
 
@@ -25,8 +27,16 @@ pub struct App {
     pub sort_order: SortOrder,
     pub filter: FilterMode,
     pub pending_qbit_deletions: Vec<String>,
+    pub pending_path_deletions: Vec<PathBuf>,
     pub state: AppState,
     pub torrents: Vec<TorrentInfo>,
+    /// Only when running against a Remote
+    pub transfers: Option<TransferQueue>,
+    /// Destination being typed for a Transfer of the selected Group
+    pub transfer_prompt: Option<String>,
+    pub confirm_quit: bool,
+    /// Last outcome worth telling the user (finished Transfer, failed delete...)
+    pub status: Option<String>,
 }
 
 #[derive(Debug)]
@@ -144,9 +154,15 @@ impl App {
             sort_order: SortOrder::Ascending,
             filter: FilterMode::All,
             pending_qbit_deletions: Vec::new(),
+            pending_path_deletions: Vec::new(),
             state: AppState::Ready,
             torrents: _torrents,
+            transfers: None,
+            transfer_prompt: None,
+            confirm_quit: false,
+            status: None,
         };
+        app.transfers = app.config.remote.clone().map(TransferQueue::new);
         app.refresh_groups();
         app
     }
@@ -269,6 +285,15 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        if let Some(transfers) = &mut self.transfers {
+            for (t, result) in transfers.tick() {
+                self.status = Some(match result {
+                    Ok(()) => format!("Transfer done: {} → {}", t.title, t.dest_dir.display()),
+                    Err(e) => format!("Transfer failed: {}: {e}", t.title),
+                });
+            }
+        }
+
         if let AppState::Scanning {
             ref mut processed,
             ref receiver,
@@ -309,6 +334,56 @@ impl App {
 
     pub fn quit(&mut self) {
         self.running = false;
+    }
+
+    /// Quits, unless Transfers are running: then asks first
+    pub fn request_quit(&mut self) {
+        if self.transfers.as_ref().is_some_and(|t| t.is_busy()) {
+            self.confirm_quit = true;
+        } else {
+            self.quit();
+        }
+    }
+
+    pub fn confirm_quit(&mut self) {
+        if let Some(transfers) = &mut self.transfers {
+            transfers.cancel_all();
+        }
+        self.quit();
+    }
+
+    /// Transfers copy Media Groups from a Remote, so not on local hosts nor in Downloads
+    pub fn can_transfer(&self) -> bool {
+        self.transfers.is_some() && self.active_tab != Tab::Downloads
+    }
+
+    pub fn request_transfer(&mut self) {
+        if self.can_transfer() && !self.current_groups().is_empty() {
+            self.transfer_prompt = Some(transfer::last_dir());
+        }
+    }
+
+    pub fn confirm_transfer(&mut self) {
+        let Some(input) = self.transfer_prompt.take() else { return };
+        let input = input.trim().to_string();
+        if input.is_empty() {
+            return;
+        }
+        let Some(group) = self.current_groups().get(self.selected_index).copied() else {
+            return;
+        };
+        let Some(source) = group.media_container.clone() else { return };
+        let title = group.title.clone();
+
+        transfer::save_last_dir(&input);
+        if let Some(transfers) = &mut self.transfers {
+            transfers.push(Transfer {
+                title: title.clone(),
+                source,
+                dest_dir: transfer::expand_tilde(&input),
+            });
+            self.status = Some(format!("Queued: {title}"));
+        }
     }
 
     // Helper to generate the list of tabs based on current config
@@ -489,10 +564,10 @@ impl App {
             }
         }
 
-        // 2. Perform actual disk deletion for non-torrent paths
+        // 2. Queue disk deletion for non-torrent paths; the Host performs it
         for path in &paths_to_remove {
-            if path.exists() {
-                let _ = std::fs::remove_file(path);
+            if !self.pending_path_deletions.contains(path) {
+                self.pending_path_deletions.push(path.clone());
             }
         }
 

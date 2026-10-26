@@ -1,3 +1,4 @@
+use crate::config::QBittorrentConfig;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -123,5 +124,18 @@ impl QbitClient for RealQbitClient {
             .send()
             .await?;
         Ok(())
+    }
+}
+
+/// Real client when its API answers, mock otherwise (offline mode).
+/// Credentials are optional: qBittorrent can skip auth for localhost.
+pub async fn connect(config: &QBittorrentConfig, use_mock: bool) -> Box<dyn QbitClient> {
+    if use_mock {
+        return Box::new(MockQbitClient);
+    }
+    match RealQbitClient::new(&config.url, config.username.clone(), config.password.clone()).await
+    {
+        Ok(client) if client.get_torrents().await.is_ok() => Box::new(client),
+        _ => Box::new(MockQbitClient),
     }
 }
