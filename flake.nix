@@ -33,6 +33,8 @@
           rust-analyzer
           rsync
           openssh
+          # Issue tracker for the agent skills (docs/agents/issue-tracker.md)
+          gh
         ];
         RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
       };
