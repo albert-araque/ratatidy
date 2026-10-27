@@ -23,14 +23,16 @@ struct Active {
 /// Runs Transfers one at a time with rsync over the Remote's SSH alias
 pub struct TransferQueue {
     remote: String,
+    identity: Option<String>,
     pending: VecDeque<Transfer>,
     active: Option<Active>,
 }
 
 impl TransferQueue {
-    pub fn new(remote: String) -> Self {
+    pub fn new(remote: String, identity: Option<String>) -> Self {
         Self {
             remote,
+            identity,
             pending: VecDeque::new(),
             active: None,
         }
@@ -74,7 +76,10 @@ impl TransferQueue {
                 Ok(Some(status)) if status.success() => Ok(()),
                 Ok(Some(status)) => {
                     let stderr = active.stderr.recv().unwrap_or_default();
-                    Err(format!("rsync failed ({status}): {}", last_line(&stderr)))
+                    Err(format!(
+                        "rsync failed ({status}): {}",
+                        rsync_failure(&stderr)
+                    ))
                 }
                 Err(e) => Err(e.to_string()),
             };
@@ -83,7 +88,9 @@ impl TransferQueue {
         }
 
         while self.active.is_none() {
-            let Some(transfer) = self.pending.pop_front() else { break };
+            let Some(transfer) = self.pending.pop_front() else {
+                break;
+            };
             match self.start(transfer.clone()) {
                 Ok(active) => self.active = Some(active),
                 Err(e) => finished.push((transfer, Err(e))),
@@ -96,7 +103,7 @@ impl TransferQueue {
     fn start(&self, transfer: Transfer) -> Result<Active, String> {
         std::fs::create_dir_all(&transfer.dest_dir)
             .map_err(|e| format!("{}: {e}", transfer.dest_dir.display()))?;
-        let mut child = rsync_command(&self.remote, &transfer)
+        let mut child = rsync_command(&self.remote, self.identity.as_deref(), &transfer)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -138,8 +145,17 @@ impl TransferQueue {
     }
 }
 
-fn rsync_command(remote: &str, transfer: &Transfer) -> Command {
+fn rsync_command(remote: &str, identity: Option<&str>, transfer: &Transfer) -> Command {
+    let spec = crate::host::ssh_for_transfer(identity);
+    let ssh = crate::host::ssh_rsh(
+        &spec.program,
+        spec.identity.as_deref(),
+        spec.known_hosts.as_deref(),
+    );
     let mut cmd = Command::new("rsync");
+    if let Some(sock) = spec.auth_sock {
+        cmd.env("SSH_AUTH_SOCK", sock);
+    }
     cmd.args([
         "--archive",
         "--partial",
@@ -149,27 +165,83 @@ fn rsync_command(remote: &str, transfer: &Transfer) -> Command {
         // Without it the overall percentage restarts as rsync discovers files
         "--no-inc-recursive",
         "-e",
-        "ssh -o BatchMode=yes",
+        &ssh,
     ]);
-    // No trailing slash on the source: rsync creates dest_dir/<Container name>
-    cmd.arg(format!("{remote}:{}", transfer.source.display()));
-    cmd.arg(&transfer.dest_dir);
+    // No trailing slash on the source: rsync creates dest_dir/<Container name>.
+    // The source is a Remote path. PathBuf on Windows would print it with
+    // backslashes, and rsync would look for it under the remote home directory.
+    cmd.arg(format!("{remote}:{}", remote_path(&transfer.source)));
+    cmd.arg(rsync_local_arg(&transfer.dest_dir));
     cmd
+}
+
+/// Remote paths always use `/`, even when this process stores them with `\`.
+fn remote_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn rsync_local_arg(path: &Path) -> String {
+    crate::host::cygdrive_path(path)
 }
 
 /// Last percentage in a chunk of `rsync --info=progress2` output
 fn parse_progress(chunk: &str) -> Option<u8> {
-    chunk
-        .split(['\r', '\n'])
-        .rev()
-        .find_map(|line| {
-            line.split_whitespace()
-                .find_map(|word| word.strip_suffix('%')?.parse::<u8>().ok())
-        })
+    chunk.split(['\r', '\n']).rev().find_map(|line| {
+        line.split_whitespace()
+            .find_map(|word| word.strip_suffix('%')?.parse::<u8>().ok())
+    })
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::rsync_failure;
+
+    #[test]
+    fn failure_prefers_the_missing_path_over_the_partial_summary() {
+        let stderr = "\
+rsync: [sender] link_stat \"/home/administrador/\\\\mnt\\\\data\" failed: No such file or directory (2)\n\
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1983) [Receiver=3.5.1]\n";
+        assert!(rsync_failure(stderr).contains("No such file or directory"));
+    }
+
+    #[test]
+    fn failure_prefers_permission_denied_over_the_protocol_line() {
+        let stderr = "\
+administrador@host: Permission denied (publickey).\n\
+rsync: connection unexpectedly closed (0 bytes received so far) [Receiver]\n\
+rsync error: error in rsync protocol data stream (code 12) at io.c(303) [Receiver=3.5.1]\n";
+        assert_eq!(
+            rsync_failure(stderr),
+            "administrador@host: Permission denied (publickey)."
+        );
+    }
 }
 
 fn last_line(text: &str) -> &str {
-    text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim()
+    text.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+}
+
+/// The last rsync line is often a generic protocol error. Prefer the line that says why.
+fn rsync_failure(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let useful = lines.iter().rev().find(|l| {
+        let lower = l.to_ascii_lowercase();
+        !lower.contains("protocol data stream")
+            && !lower.contains("connection unexpectedly closed")
+            && !lower.contains("io.c(")
+            && !lower.contains("some files/attrs were not transferred")
+    });
+    useful
+        .map(|l| (*l).to_string())
+        .unwrap_or_else(|| last_line(stderr).to_string())
 }
 
 fn last_dir_file() -> Option<PathBuf> {
@@ -223,7 +295,9 @@ pub fn complete_dir(input: &str) -> String {
 
     let mut matches = list_subdirs(&dir)
         .into_iter()
-        .filter(|name| name.starts_with(prefix) && (prefix.starts_with('.') || !name.starts_with('.')))
+        .filter(|name| {
+            name.starts_with(prefix) && (prefix.starts_with('.') || !name.starts_with('.'))
+        })
         .collect::<Vec<_>>();
     matches.sort();
 
@@ -231,7 +305,9 @@ pub fn complete_dir(input: &str) -> String {
         [] => input.to_string(),
         [only] => format!("{dir_part}{only}/"),
         [first, rest @ ..] => {
-            let common = rest.iter().fold(first.as_str(), |acc, name| common_prefix(acc, name));
+            let common = rest
+                .iter()
+                .fold(first.as_str(), |acc, name| common_prefix(acc, name));
             format!("{dir_part}{common}")
         }
     }
@@ -266,7 +342,8 @@ mod tests {
 
     #[test]
     fn progress_takes_the_latest_update_in_a_chunk() {
-        let chunk = "     32,768   0%    0.00kB/s    0:00:00\r  1,048,576  42%   10.50MB/s    0:01:23\r";
+        let chunk =
+            "     32,768   0%    0.00kB/s    0:00:00\r  1,048,576  42%   10.50MB/s    0:01:23\r";
         assert_eq!(parse_progress(chunk), Some(42));
     }
 
@@ -288,11 +365,78 @@ mod tests {
             source: "/mnt/data/media/movies/Inception (2010)".into(),
             dest_dir: "/home/me/Videos".into(),
         };
-        let cmd = rsync_command("media-server", &transfer);
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let cmd = rsync_command("media-server", None, &transfer);
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert_eq!(
             &args[args.len() - 2..],
-            ["media-server:/mnt/data/media/movies/Inception (2010)", "/home/me/Videos"]
+            [
+                "media-server:/mnt/data/media/movies/Inception (2010)",
+                "/home/me/Videos"
+            ]
+        );
+        let e = args.windows(2).find(|w| w[0] == "-e").expect("-e");
+        assert!(e[1].contains("BatchMode=yes"), "{}", e[1]);
+    }
+
+    #[test]
+    fn remote_source_keeps_forward_slashes() {
+        let transfer = Transfer {
+            title: "Inception (2010)".into(),
+            source: PathBuf::from(r"\mnt\data\media\movies\Inception (2010)"),
+            dest_dir: PathBuf::from(r"C:\Users\me\Videos"),
+        };
+        let cmd = rsync_command("media-server", None, &transfer);
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            args[args.len() - 2],
+            "media-server:/mnt/data/media/movies/Inception (2010)"
+        );
+    }
+
+    #[test]
+    fn windows_drive_is_a_cygdrive_path() {
+        assert_eq!(
+            rsync_local_arg(Path::new(r"C:\Users\me\Videos")),
+            "/cygdrive/c/Users/me/Videos"
+        );
+        assert_eq!(
+            rsync_local_arg(Path::new(r"\\?\D:\Media")),
+            "/cygdrive/d/Media"
+        );
+        assert_eq!(
+            rsync_local_arg(Path::new("/home/me/Videos")),
+            "/home/me/Videos"
+        );
+    }
+
+    #[test]
+    fn rsync_passes_the_identity_file_to_ssh() {
+        let transfer = Transfer {
+            title: "Inception (2010)".into(),
+            source: "/mnt/data/media/movies/Inception (2010)".into(),
+            dest_dir: "/home/me/Videos".into(),
+        };
+        let cmd = rsync_command(
+            "media-server",
+            Some(r"C:\Users\me\.ssh\server\server"),
+            &transfer,
+        );
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let e = args.windows(2).find(|w| w[0] == "-e").expect("-e");
+        assert!(
+            e[1].contains("-i /cygdrive/c/Users/me/.ssh/server/server")
+                || e[1].contains("-i C:/Users/me/.ssh/server/server"),
+            "{}",
+            e[1]
         );
     }
 
@@ -308,7 +452,10 @@ mod tests {
         assert_eq!(complete_dir(&format!("{base}M")), format!("{base}M"));
         assert_eq!(complete_dir(&format!("{base}Mo")), format!("{base}Movies/"));
         assert_eq!(complete_dir(&format!("{base}x")), format!("{base}x"));
-        assert_eq!(complete_dir(&format!("{base}.h")), format!("{base}.hidden/"));
+        assert_eq!(
+            complete_dir(&format!("{base}.h")),
+            format!("{base}.hidden/")
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -321,7 +468,10 @@ mod tests {
 
     #[test]
     fn tilde_expands_to_home_only_at_start() {
-        let home = directories::BaseDirs::new().unwrap().home_dir().to_path_buf();
+        let home = directories::BaseDirs::new()
+            .unwrap()
+            .home_dir()
+            .to_path_buf();
         assert_eq!(expand_tilde("~/Videos"), home.join("Videos"));
         assert_eq!(expand_tilde("~"), home);
         assert_eq!(expand_tilde("/tmp/~x"), PathBuf::from("/tmp/~x"));

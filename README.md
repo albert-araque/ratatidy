@@ -54,9 +54,20 @@ Ratatidy can run on your PC while an **Agent** (the same binary) does the scanni
    ```bash
    ratatidy --remote <alias>            # or RATATIDY_REMOTE / `remote = "<alias>"` in config.toml
    ```
-   `<alias>` is a host from `~/.ssh/config`. The Agent path defaults to `~/.local/bin/ratatidy`; override it with `--remote-agent`.
+   `<alias>` is a host from `~/.ssh/config`, or `user@host`. The Agent path defaults to `~/.local/bin/ratatidy`; override it with `--remote-agent`. A key that is not the default one is `--remote-identity <file>`, the same `-i` you would pass to `ssh`. A relative path such as `.ssh/server/server` is read from your home directory.
 
 In remote mode, **c** on a Media tab queues a **Transfer**: an rsync copy of the selected Group's folder to a directory on your PC (Tab completes paths, the last one is remembered). Transfers run one at a time in the background; quitting asks first and cancels them, and rsync resumes next time.
+
+## Web catalog
+
+On the Host (the machine that holds the files), `ratatidy serve` publishes a read-only catalog at <http://127.0.0.1:8787>. It scans in the background, groups the library the same way the TUI does, and does not delete or transfer anything. It only binds to a loopback address.
+
+```bash
+ratatidy serve
+ratatidy serve --bind 127.0.0.1:8787   # or RATATIDY_BIND
+```
+
+Open another SSH session if you also want the TUI. To see a Remote, run `serve` there and forward the port (`ssh -L 8787:127.0.0.1:8787`).
 
 ## 🧑‍💻 Development
 

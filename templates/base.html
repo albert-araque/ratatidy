@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if scanning %}<meta http-equiv="refresh" content="3">{% endif %}
+  <title>{% block title %}Ratatidy{% endblock %}</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Ratatidy</a>
+    <nav>
+      {% for item in nav %}
+      <a href="{{ item.href }}" {% if item.active %}class="active"{% endif %}>{{ item.label }}</a>
+      {% endfor %}
+      <form method="post" action="/rescan">
+        <button type="submit" {% if scanning %}disabled{% endif %}>Volver a escanear</button>
+      </form>
+    </nav>
+  </header>
+  {% if !scan_message.is_empty() %}<p class="banner">{{ scan_message }}</p>{% endif %}
+  <main>
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -162,7 +162,11 @@ impl App {
             confirm_quit: false,
             status: None,
         };
-        app.transfers = app.config.remote.clone().map(TransferQueue::new);
+        app.transfers = app
+            .config
+            .remote
+            .clone()
+            .map(|remote| TransferQueue::new(remote, app.config.remote_identity.clone()));
         app.refresh_groups();
         app
     }
@@ -306,18 +310,7 @@ impl App {
                     }
                     crate::scanner::ScanEvent::Finished(mut nodes) => {
                         // Enrich nodes with torrent data
-                        for node in &mut nodes {
-                            for path in &node.paths {
-                                let path_str = path.to_string_lossy();
-                                for torrent in &self.torrents {
-                                    if path_str.contains(&torrent.name) {
-                                        node.torrent_hash = Some(torrent.hash.clone());
-                                        node.is_seeding = torrent.state.contains("UP")
-                                            || torrent.state.contains("uploading");
-                                    }
-                                }
-                            }
-                        }
+                        crate::qbittorrent::match_torrents(&mut nodes, &self.torrents);
                         self.nodes = nodes;
                         self.refresh_groups();
                         self.state = AppState::Ready;
@@ -364,7 +357,9 @@ impl App {
     }
 
     pub fn confirm_transfer(&mut self) {
-        let Some(input) = self.transfer_prompt.take() else { return };
+        let Some(input) = self.transfer_prompt.take() else {
+            return;
+        };
         let input = input.trim().to_string();
         if input.is_empty() {
             return;
@@ -372,7 +367,9 @@ impl App {
         let Some(group) = self.current_groups().get(self.selected_index).copied() else {
             return;
         };
-        let Some(source) = group.media_container.clone() else { return };
+        let Some(source) = group.media_container.clone() else {
+            return;
+        };
         let title = group.title.clone();
 
         transfer::save_last_dir(&input);

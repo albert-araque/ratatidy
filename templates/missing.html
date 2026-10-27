@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}No encontrado · Ratatidy{% endblock %}
+{% block body %}
+<h1>No está en esta foto</h1>
+<p class="lede">Ese grupo no está en el último escaneo. Puede haber cambiado de carpeta, o el escaneo todavía no ha terminado.</p>
+<a class="back" href="{{ back_href }}">← {{ back_label }}</a>
+{% endblock %}

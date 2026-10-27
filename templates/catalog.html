@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · Ratatidy{% endblock %}
+{% block body %}
+<h1>{{ heading }}</h1>
+<p class="path-display">{{ folder }}</p>
+<div class="toolbar">
+  <form method="get" action="{{ action }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="Buscar por título" aria-label="Buscar por título">
+    {% if filter_value != "all" %}<input type="hidden" name="filter" value="{{ filter_value }}">{% endif %}
+    {% if sort_value != "name" %}<input type="hidden" name="sort" value="{{ sort_value }}">{% endif %}
+    {% if order_value != "asc" %}<input type="hidden" name="order" value="{{ order_value }}">{% endif %}
+    <button type="submit">Buscar</button>
+  </form>
+  <div class="chips">
+    {% for chip in filters %}<a href="{{ chip.href }}" {% if chip.active %}class="active"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+  <div class="chips">
+    {% for chip in sorts %}<a href="{{ chip.href }}" {% if chip.active %}class="active"{% endif %}>{{ chip.label }}</a>{% endfor %}
+  </div>
+</div>
+{% if cards.is_empty() %}
+<p class="empty">No hay grupos con este filtro.</p>
+{% else %}
+<div class="cards">
+  {% for card in cards %}
+  <a class="card" href="{{ card.href }}">
+    <h2>{{ card.title }}</h2>
+    <p class="meta">{{ card.size_label }} · {{ card.files_label }}</p>
+    <p class="badges">
+      <span class="badge {{ card.link_class }}">{{ card.link_label }}</span>
+      {% if card.seeding %}<span class="badge seed">En seed</span>{% endif %}
+    </p>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -44,6 +44,11 @@ pub struct Config {
     #[arg(long, default_value = DEFAULT_REMOTE_AGENT, env = "RATATIDY_REMOTE_AGENT")]
     #[serde(default = "default_remote_agent")]
     pub remote_agent: String,
+
+    /// Private key for the Remote, passed to ssh as `-i` (same as `ssh -i <file> user@host`)
+    #[arg(long, env = "RATATIDY_REMOTE_IDENTITY")]
+    #[serde(default)]
+    pub remote_identity: Option<String>,
 }
 
 const DEFAULT_REMOTE_AGENT: &str = "~/.local/bin/ratatidy";
@@ -127,6 +132,7 @@ impl Default for Config {
             },
             remote: None,
             remote_agent: default_remote_agent(),
+            remote_identity: None,
         }
     }
 }

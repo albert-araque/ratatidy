@@ -1,10 +1,13 @@
 mod agent;
+mod agent_bridge;
 mod app;
+mod catalog;
 mod config;
 mod grouping;
 mod host;
 mod qbittorrent;
 mod scanner;
+mod serve;
 mod transfer;
 mod tui;
 mod ui;
@@ -154,6 +157,9 @@ async fn main() -> Result<()> {
     if args.get(1).map(String::as_str) == Some("agent") {
         return agent::run(args.get(2).map(String::as_str)).await;
     }
+    if args.get(1).map(String::as_str) == Some("serve") {
+        return serve::run(&args[2..]).await;
+    }
 
     // Try to load saved config first, fall back to CLI/env
     let cli = Config::load();
@@ -163,12 +169,19 @@ async fn main() -> Result<()> {
         config.remote = cli.remote.clone();
         config.remote_agent = cli.remote_agent.clone();
     }
+    if cli.remote_identity.is_some() {
+        config.remote_identity = cli.remote_identity.clone();
+    }
+    if let Some(identity) = config.remote_identity.clone() {
+        config.remote_identity = Some(crate::host::resolve_identity(&identity));
+    }
 
     let (host, torrents) = match config.remote.clone() {
         Some(alias) => {
             let remote = Remote {
                 alias,
                 agent: config.remote_agent.clone(),
+                identity: config.remote_identity.clone(),
             };
             println!("Connecting to Agent on '{}'...", remote.alias);
             let info = remote.info()?;

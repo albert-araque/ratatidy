@@ -267,7 +267,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             crate::app::SortOrder::Ascending => "↑",
             crate::app::SortOrder::Descending => "↓",
         };
-        let transfer_key = if app.can_transfer() { "c:Transfer | " } else { "" };
+        let transfer_key = if app.can_transfer() {
+            "c:Transfer | "
+        } else {
+            ""
+        };
         format!(
             " Tab | i:Info | d:Delete | {}s:Sort ({:?}) | S:{} {} | f:Filter ({:?}) | /:Search | q:Quit ",
             transfer_key, app.sort_by, sort_order_label, sort_order_arrow, app.filter
@@ -278,12 +282,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         ratatui::text::Line::from(status_line(app)).fg(Color::Cyan),
         ratatui::text::Line::from(footer_text),
     ])
-        .block(Block::default().borders(Borders::ALL))
-        .style(if app.search_active {
-            Style::default().fg(Color::Cyan).bold()
-        } else {
-            Style::default()
-        });
+    .block(Block::default().borders(Borders::ALL))
+    .style(if app.search_active {
+        Style::default().fg(Color::Cyan).bold()
+    } else {
+        Style::default()
+    });
     frame.render_widget(footer, chunks[3]);
 
     // Dashboard
@@ -300,7 +304,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         let text = vec![
             ratatui::text::Line::from(format!("Copy '{}' into:", title)),
             ratatui::text::Line::from(""),
-            ratatui::text::Line::from(format!("{}█", input)).fg(Color::Cyan).bold(),
+            ratatui::text::Line::from(format!("{}█", input))
+                .fg(Color::Cyan)
+                .bold(),
             ratatui::text::Line::from(""),
             ratatui::text::Line::from("(Tab to complete / Enter to queue / Esc to cancel)").dim(),
         ];
@@ -345,7 +351,10 @@ fn status_line(app: &App) -> String {
             return format!(" ⇣ {} {}%{}", t.title, percent, queued);
         }
     }
-    app.status.as_deref().map(|s| format!(" {}", s)).unwrap_or_default()
+    app.status
+        .as_deref()
+        .map(|s| format!(" {}", s))
+        .unwrap_or_default()
 }
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`

@@ -1,6 +1,6 @@
 # Ratatidy Proyect Status
 
-> **Last Updated**: 2026-02-12
+> **Last Updated**: 2026-10-27
 > **Current Version**: 0.2.0-beta
 
 ## 1. Overview
@@ -26,7 +26,7 @@ The application is fully functional for its core purpose: detecting and managing
 - [x] **Rescan**: Trigger a rescan without restarting (`r` key).
 
 ### Remote
-- [x] **Remote mode**: TUI on the PC, Agent on the server over SSH (`ratatidy agent info|scan|delete`, protocol-versioned).
+- [x] **Remote mode**: TUI on the PC, Agent on the server over SSH (`ratatidy agent info|scan|delete`, protocol-versioned). `--remote-identity` passes a private key (`ssh -i`).
 - [x] **Transfer**: queue rsync copies of Media Groups from the Remote to the PC (`c` key), with progress and quit guard.
 
 ### Safety
@@ -49,7 +49,7 @@ The application is fully functional for its core purpose: detecting and managing
 - [ ] **Container Safety**: strictly prevent deleting folders that contain files outside the known group structure.
 
 ### Long Term
-- [ ] **Web UI**: A read-only web dashboard for remote viewing.
+- [x] **Web UI**: Read-only catalog on the Host (`ratatidy serve`, loopback only). Pages for the library, each media folder, downloads, and a group. No delete.
 
 ## 4. Known Issues
 1. **Empty Folder Clutter**: "Container" deletion mode works great for files, but leaves empty directories behind.

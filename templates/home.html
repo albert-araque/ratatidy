@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Biblioteca · Ratatidy{% endblock %}
+{% block body %}
+<h1>Biblioteca</h1>
+<p class="lede">Hardlinks entre descargas y media. Solo lectura.</p>
+<section class="stats">
+  <article><h2>Ficheros</h2><p>{{ summary.file_count }}</p></article>
+  <article><h2>Tamaño</h2><p>{{ summary.total_size }}</p></article>
+  <article><h2>Ahorrado</h2><p>{{ summary.saved_size }}</p></article>
+  <article><h2>Sin enlace</h2><p>{{ summary.orphan_files }}</p></article>
+  <article><h2>En seed</h2><p>{{ summary.seeding_files }}</p></article>
+</section>
+<section>
+  <h2>Sin enlace completo</h2>
+  {% if orphans.is_empty() %}
+  <p class="empty">No hay grupos a medias. O el escaneo todavía no ha terminado.</p>
+  {% else %}
+  <div class="cards">
+    {% for card in orphans %}
+    <a class="card" href="{{ card.href }}">
+      <h3>{{ card.title }}</h3>
+      <p class="meta">{{ card.size_label }} · {{ card.files_label }}</p>
+      <p class="badges">
+        <span class="badge {{ card.link_class }}">{{ card.link_label }}</span>
+        {% if card.seeding %}<span class="badge seed">En seed</span>{% endif %}
+      </p>
+    </a>
+    {% endfor %}
+  </div>
+  {% if more_orphans > 0 %}<p class="empty">{{ more_orphans }} más en los catálogos.</p>{% endif %}
+  {% endif %}
+</section>
+{% endblock %}

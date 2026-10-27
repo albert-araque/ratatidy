@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ detail.title }} · Ratatidy{% endblock %}
+{% block body %}
+<a class="back" href="{{ detail.back_href }}">← {{ detail.back_label }}</a>
+<h1>{{ detail.title }}</h1>
+<p class="badges">
+  <span class="badge {{ detail.link_class }}">{{ detail.link_label }}</span>
+  {% if detail.seeding %}<span class="badge seed">En seed</span>{% endif %}
+</p>
+<p class="lede">{{ detail.size_label }} · {{ detail.files_label }} · {{ detail.date_label }}</p>
+<div class="columns">
+  <section class="panel">
+    <h2>Rutas en media</h2>
+    {% if detail.media_paths.is_empty() %}
+    <p class="empty">Ninguna.</p>
+    {% else %}
+    {% for line in detail.media_paths %}
+    <article class="file">
+      <p>{{ line.link_label }} · {{ line.size_label }}</p>
+      <code>{{ line.path }}</code>
+    </article>
+    {% endfor %}
+    {% endif %}
+  </section>
+  <section class="panel">
+    <h2>Rutas en descargas</h2>
+    {% if detail.download_paths.is_empty() %}
+    <p class="empty">Ninguna.</p>
+    {% else %}
+    {% for line in detail.download_paths %}
+    <article class="file">
+      <p>{{ line.link_label }} · {{ line.size_label }}</p>
+      <code>{{ line.path }}</code>
+    </article>
+    {% endfor %}
+    {% endif %}
+  </section>
+</div>
+<section class="panel stack">
+  <h2>Torrent</h2>
+  {% if detail.torrents.is_empty() %}
+  <p class="empty">Sin torrent asociado.</p>
+  {% else %}
+  {% for torrent in detail.torrents %}
+  <article class="file">
+    <p>{% if torrent.seeding %}En seed{% else %}No está en seed{% endif %}{% if !torrent.state.is_empty() %} · {{ torrent.state }}{% endif %}</p>
+    <code>{{ torrent.name }}</code>
+  </article>
+  {% endfor %}
+  {% endif %}
+</section>
+{% endblock %}

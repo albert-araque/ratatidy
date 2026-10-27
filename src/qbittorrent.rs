@@ -1,6 +1,24 @@
 use crate::config::QBittorrentConfig;
+use crate::scanner::FileNode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+/// Same name heuristic the TUI uses: a path that contains the torrent name takes its hash and seed state.
+/// The last matching torrent wins.
+pub fn match_torrents(nodes: &mut [FileNode], torrents: &[TorrentInfo]) {
+    for node in nodes {
+        for path in &node.paths {
+            let path_str = path.to_string_lossy();
+            for torrent in torrents {
+                if path_str.contains(&torrent.name) {
+                    node.torrent_hash = Some(torrent.hash.clone());
+                    node.is_seeding =
+                        torrent.state.contains("UP") || torrent.state.contains("uploading");
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TorrentInfo {
@@ -133,9 +151,65 @@ pub async fn connect(config: &QBittorrentConfig, use_mock: bool) -> Box<dyn Qbit
     if use_mock {
         return Box::new(MockQbitClient);
     }
-    match RealQbitClient::new(&config.url, config.username.clone(), config.password.clone()).await
+    match RealQbitClient::new(
+        &config.url,
+        config.username.clone(),
+        config.password.clone(),
+    )
+    .await
     {
         Ok(client) if client.get_torrents().await.is_ok() => Box::new(client),
         _ => Box::new(MockQbitClient),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::FileKey;
+    use std::path::PathBuf;
+    use std::time::SystemTime;
+
+    fn node(path: &str) -> FileNode {
+        FileNode {
+            key: FileKey { dev: 1, inode: 1 },
+            size: 10,
+            nlink: 1,
+            paths: vec![PathBuf::from(path)],
+            has_downloads: true,
+            has_media: false,
+            torrent_hash: None,
+            is_seeding: false,
+            modified: Some(SystemTime::UNIX_EPOCH),
+        }
+    }
+
+    #[test]
+    fn match_torrents_uses_the_path_and_the_last_name_hit() {
+        let mut nodes = vec![node("/downloads/Inception.2010.1080p/movie.mkv")];
+        let torrents = vec![
+            TorrentInfo {
+                hash: "first".into(),
+                name: "Inception.2010".into(),
+                state: "downloading".into(),
+                progress: 0.5,
+                ratio: 0.0,
+            },
+            TorrentInfo {
+                hash: "second".into(),
+                name: "Inception.2010.1080p".into(),
+                state: "stalledUP".into(),
+                progress: 1.0,
+                ratio: 1.0,
+            },
+        ];
+        match_torrents(&mut nodes, &torrents);
+        assert_eq!(nodes[0].torrent_hash.as_deref(), Some("second"));
+        assert!(nodes[0].is_seeding);
+
+        let mut missed = vec![node("/downloads/Other/movie.mkv")];
+        match_torrents(&mut missed, &torrents);
+        assert!(missed[0].torrent_hash.is_none());
+        assert!(!missed[0].is_seeding);
     }
 }
